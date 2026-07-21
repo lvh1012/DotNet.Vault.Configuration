@@ -43,11 +43,26 @@ public class VaultLeaseRenewer
         TimeSpan increment,
         CancellationToken cancellationToken = default)
     {
+        if (string.IsNullOrWhiteSpace(leaseId))
+        {
+            throw new ArgumentException("Lease ID cannot be null or empty.", nameof(leaseId));
+        }
+
+        if (increment < TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(increment), "Increment cannot be negative.");
+        }
+
+        if (increment.TotalSeconds > int.MaxValue)
+        {
+            throw new ArgumentOutOfRangeException(nameof(increment), "Increment exceeds the maximum supported value.");
+        }
+
         try
         {
             var client = _httpClientFactory.CreateClient(VaultHttpClientFactoryExtensions.VaultClientName);
             var payload = new { lease_id = leaseId, increment = (int)increment.TotalSeconds };
-            var response = await client.PutAsJsonAsync("/v1/sys/leases/renew", payload, cancellationToken);
+            using var response = await client.PutAsJsonAsync("/v1/sys/leases/renew", payload, cancellationToken);
             response.EnsureSuccessStatusCode();
             var result = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: cancellationToken);
             return result.TryGetProperty("lease_duration", out var d) ? TimeSpan.FromSeconds(d.GetInt32()) : null;
@@ -55,7 +70,7 @@ public class VaultLeaseRenewer
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to renew lease {LeaseId}", leaseId);
-            throw new VaultLeaseRenewalException(leaseId, ex.Message);
+            throw new VaultLeaseRenewalException(leaseId, ex.Message, ex);
         }
     }
 }
