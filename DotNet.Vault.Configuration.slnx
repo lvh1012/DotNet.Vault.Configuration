@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="DotNet.Vault.Configuration.csproj" />
+  <Project Path="tests/DotNet.Vault.Configuration.Tests/DotNet.Vault.Configuration.Tests.csproj" />
+</Solution>
