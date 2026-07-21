@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
@@ -43,12 +44,15 @@ public class PkiSecretBackend : IVaultSecretBackend
     /// <inheritdoc />
     public async Task<SecretResult> GetSecretsAsync(SecretRequest request, CancellationToken cancellationToken = default)
     {
-        var payload = new
+        var payload = new Dictionary<string, object>
         {
-            common_name = _options.CommonName,
-            alt_names = string.Join(",", _options.AltNames),
-            ttl = _options.Ttl?.TotalSeconds.ToString()
+            ["common_name"] = _options.CommonName,
+            ["alt_names"] = string.Join(",", _options.AltNames)
         };
+        if (_options.Ttl.HasValue)
+        {
+            payload["ttl"] = _options.Ttl.Value.TotalSeconds.ToString();
+        }
 
         var content = new StringContent(
             JsonSerializer.Serialize(payload),
