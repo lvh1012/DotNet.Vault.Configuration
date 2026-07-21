@@ -18,10 +18,10 @@ namespace DotNet.Vault.Configuration.Core;
 /// secret backends required by the requested backends, then resolves the
 /// <see cref="VaultClient"/>, <see cref="SecretRefresher"/>, and
 /// <see cref="ILogger{T}"/> needed by the provider. The
-/// <see cref="Microsoft.Extensions.Options.Options.Create{T}(T)"/> wrapper is
-/// used to bind <see cref="TokenAuthenticationOptions"/> for
-/// <see cref="TokenAuthProvider"/> without depending on the caller's options
-/// pipeline.
+/// <c>Microsoft.Extensions.Options.Options.Create{T}(T)</c> wrapper is
+/// used to bind each authentication options block to its corresponding
+/// <see cref="IVaultAuthenticationProvider"/> implementation without
+/// depending on the caller's options pipeline.
 /// </remarks>
 public class VaultConfigurationSource : IConfigurationSource
 {
@@ -50,6 +50,26 @@ public class VaultConfigurationSource : IConfigurationSource
         if (Options.Authentication.Token != null)
             services.AddSingleton<IVaultAuthenticationProvider>(sp =>
                 new TokenAuthProvider(Microsoft.Extensions.Options.Options.Create(Options.Authentication.Token)));
+
+        if (Options.Authentication.AppRole != null)
+            services.AddSingleton<IVaultAuthenticationProvider>(sp =>
+                new AppRoleAuthProvider(Microsoft.Extensions.Options.Options.Create(Options.Authentication.AppRole), sp.GetRequiredService<HttpClient>()));
+
+        if (Options.Authentication.Kubernetes != null)
+            services.AddSingleton<IVaultAuthenticationProvider>(sp =>
+                new KubernetesAuthProvider(Microsoft.Extensions.Options.Options.Create(Options.Authentication.Kubernetes), sp.GetRequiredService<HttpClient>()));
+
+        if (Options.Authentication.Ldap != null)
+            services.AddSingleton<IVaultAuthenticationProvider>(sp =>
+                new LdapAuthProvider(Microsoft.Extensions.Options.Options.Create(Options.Authentication.Ldap), sp.GetRequiredService<HttpClient>()));
+
+        if (Options.Authentication.AwsIam != null)
+            services.AddSingleton<IVaultAuthenticationProvider>(sp =>
+                new AwsIamAuthProvider(Microsoft.Extensions.Options.Options.Create(Options.Authentication.AwsIam)));
+
+        if (Options.Authentication.TlsCertificate != null)
+            services.AddSingleton<IVaultAuthenticationProvider>(sp =>
+                new TlsCertificateAuthProvider(Microsoft.Extensions.Options.Options.Create(Options.Authentication.TlsCertificate)));
 
         if (Options.Kv.Enabled)
             services.AddSingleton<IVaultSecretBackend>(sp =>
