@@ -1,6 +1,8 @@
+using System.Net.Http;
 using System.Text.Json;
 using DotNet.Vault.Configuration.Authentication;
 using DotNet.Vault.Configuration.Core;
+using DotNet.Vault.Configuration.Http;
 
 namespace DotNet.Vault.Configuration.Backends;
 
@@ -18,19 +20,19 @@ namespace DotNet.Vault.Configuration.Backends;
 public class KvSecretBackend : IVaultSecretBackend
 {
     private readonly KvSecretBackendOptions _options;
-    private readonly HttpClient _httpClient;
+    private readonly IHttpClientFactory _httpClientFactory;
     private readonly IVaultAuthenticationProvider? _authProvider;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="KvSecretBackend"/> class.
     /// </summary>
     /// <param name="options">The KV backend options.</param>
-    /// <param name="httpClient">The HTTP client used to call the Vault API.</param>
+    /// <param name="httpClientFactory">The HTTP client factory used to create Vault API clients.</param>
     /// <param name="authProvider">The optional authentication provider used to attach an <c>X-Vault-Token</c> header to outgoing requests.</param>
-    public KvSecretBackend(KvSecretBackendOptions options, HttpClient httpClient, IVaultAuthenticationProvider? authProvider = null)
+    public KvSecretBackend(KvSecretBackendOptions options, IHttpClientFactory httpClientFactory, IVaultAuthenticationProvider? authProvider = null)
     {
         _options = options;
-        _httpClient = httpClient;
+        _httpClientFactory = httpClientFactory;
         _authProvider = authProvider;
     }
 
@@ -48,7 +50,8 @@ public class KvSecretBackend : IVaultSecretBackend
                 httpRequest.Headers.Add("X-Vault-Token", token);
         }
 
-        var response = await _httpClient.SendAsync(httpRequest, cancellationToken).ConfigureAwait(false);
+        var client = _httpClientFactory.CreateClient(VaultHttpClientFactoryExtensions.VaultClientName);
+        var response = await client.SendAsync(httpRequest, cancellationToken).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
 
         var content = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);

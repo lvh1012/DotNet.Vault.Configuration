@@ -1,7 +1,9 @@
 using DotNet.Vault.Configuration.Authentication;
 using DotNet.Vault.Configuration.Backends;
 using DotNet.Vault.Configuration.Core.Exceptions;
+using DotNet.Vault.Configuration.Http;
 using Microsoft.Extensions.Logging;
+using System.Net.Http;
 using System.Text.Json;
 
 namespace DotNet.Vault.Configuration.Core;
@@ -19,7 +21,7 @@ namespace DotNet.Vault.Configuration.Core;
 /// </remarks>
 public class VaultClient
 {
-    private readonly HttpClient _httpClient;
+    private readonly IHttpClientFactory _httpClientFactory;
     private readonly VaultOptions _options;
     private readonly IEnumerable<IVaultAuthenticationProvider> _authProviders;
     private readonly IEnumerable<IVaultSecretBackend> _backends;
@@ -28,26 +30,23 @@ public class VaultClient
     /// <summary>
     /// Initializes a new instance of the <see cref="VaultClient"/> class.
     /// </summary>
-    /// <param name="httpClient">The <see cref="HttpClient"/> used to talk to the Vault server.</param>
+    /// <param name="httpClientFactory">The <see cref="IHttpClientFactory"/> used to create Vault HTTP clients.</param>
     /// <param name="options">The configured <see cref="VaultOptions"/> for the target Vault server.</param>
     /// <param name="authProviders">The available authentication providers.</param>
     /// <param name="backends">The available secret backends.</param>
     /// <param name="logger">The logger used for diagnostic output.</param>
     public VaultClient(
-        HttpClient httpClient,
+        IHttpClientFactory httpClientFactory,
         VaultOptions options,
         IEnumerable<IVaultAuthenticationProvider> authProviders,
         IEnumerable<IVaultSecretBackend> backends,
         ILogger<VaultClient> logger)
     {
-        _httpClient = httpClient;
+        _httpClientFactory = httpClientFactory;
         _options = options;
         _authProviders = authProviders;
         _backends = backends;
         _logger = logger;
-
-        _httpClient.BaseAddress = _options.Uri;
-        _httpClient.Timeout = _options.Timeout;
     }
 
     /// <summary>
@@ -125,7 +124,8 @@ public class VaultClient
     {
         try
         {
-            var response = await _httpClient.GetAsync("/v1/sys/health", cancellationToken);
+            var client = _httpClientFactory.CreateClient(VaultHttpClientFactoryExtensions.VaultClientName);
+            var response = await client.GetAsync("/v1/sys/health", cancellationToken);
             var content = await response.Content.ReadAsStringAsync(cancellationToken);
             return JsonSerializer.Deserialize<VaultHealthResponse>(content)!;
         }
@@ -151,7 +151,8 @@ public class VaultClient
             var request = new HttpRequestMessage(HttpMethod.Get, "/v1/auth/token/lookup-self");
             request.Headers.Add("X-Vault-Token", token);
 
-            var response = await _httpClient.SendAsync(request, cancellationToken);
+            var client = _httpClientFactory.CreateClient(VaultHttpClientFactoryExtensions.VaultClientName);
+            var response = await client.SendAsync(request, cancellationToken);
             return response.IsSuccessStatusCode;
         }
         catch

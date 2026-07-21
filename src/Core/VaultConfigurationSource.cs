@@ -1,9 +1,11 @@
 using DotNet.Vault.Configuration.Authentication;
 using DotNet.Vault.Configuration.Backends;
+using DotNet.Vault.Configuration.Http;
 using DotNet.Vault.Configuration.Refresh;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using System.Net.Http;
 
 namespace DotNet.Vault.Configuration.Core;
 
@@ -44,8 +46,13 @@ public class VaultConfigurationSource : IConfigurationSource
 
         services.AddSingleton(Options);
         services.AddSingleton<VaultClient>();
-        services.AddSingleton(new HttpClient { BaseAddress = Options.Uri, Timeout = Options.Timeout });
         services.AddSingleton<SecretRefresher>();
+
+        services.AddHttpClient(VaultHttpClientFactoryExtensions.VaultClientName, client =>
+        {
+            client.BaseAddress = Options.Uri;
+            client.Timeout = Options.Timeout;
+        });
 
         if (Options.Authentication.Token != null)
             services.AddSingleton<IVaultAuthenticationProvider>(sp =>
@@ -53,15 +60,21 @@ public class VaultConfigurationSource : IConfigurationSource
 
         if (Options.Authentication.AppRole != null)
             services.AddSingleton<IVaultAuthenticationProvider>(sp =>
-                new AppRoleAuthProvider(Microsoft.Extensions.Options.Options.Create(Options.Authentication.AppRole), sp.GetRequiredService<HttpClient>()));
+                new AppRoleAuthProvider(
+                    Microsoft.Extensions.Options.Options.Create(Options.Authentication.AppRole),
+                    sp.GetRequiredService<IHttpClientFactory>().CreateClient(VaultHttpClientFactoryExtensions.VaultClientName)));
 
         if (Options.Authentication.Kubernetes != null)
             services.AddSingleton<IVaultAuthenticationProvider>(sp =>
-                new KubernetesAuthProvider(Microsoft.Extensions.Options.Options.Create(Options.Authentication.Kubernetes), sp.GetRequiredService<HttpClient>()));
+                new KubernetesAuthProvider(
+                    Microsoft.Extensions.Options.Options.Create(Options.Authentication.Kubernetes),
+                    sp.GetRequiredService<IHttpClientFactory>().CreateClient(VaultHttpClientFactoryExtensions.VaultClientName)));
 
         if (Options.Authentication.Ldap != null)
             services.AddSingleton<IVaultAuthenticationProvider>(sp =>
-                new LdapAuthProvider(Microsoft.Extensions.Options.Options.Create(Options.Authentication.Ldap), sp.GetRequiredService<HttpClient>()));
+                new LdapAuthProvider(
+                    Microsoft.Extensions.Options.Options.Create(Options.Authentication.Ldap),
+                    sp.GetRequiredService<IHttpClientFactory>().CreateClient(VaultHttpClientFactoryExtensions.VaultClientName)));
 
         if (Options.Authentication.AwsIam != null)
             services.AddSingleton<IVaultAuthenticationProvider>(sp =>
@@ -73,15 +86,15 @@ public class VaultConfigurationSource : IConfigurationSource
 
         if (Options.Kv.Enabled)
             services.AddSingleton<IVaultSecretBackend>(sp =>
-                new KvSecretBackend(Options.Kv, new HttpClient { BaseAddress = Options.Uri }, sp.GetService<IVaultAuthenticationProvider>()));
+                new KvSecretBackend(Options.Kv, sp.GetRequiredService<IHttpClientFactory>(), sp.GetService<IVaultAuthenticationProvider>()));
 
         if (Options.Database.Enabled)
             services.AddSingleton<IVaultSecretBackend>(sp =>
-                new DatabaseSecretBackend(Options.Database, new HttpClient { BaseAddress = Options.Uri }, sp.GetService<IVaultAuthenticationProvider>()));
+                new DatabaseSecretBackend(Options.Database, sp.GetRequiredService<IHttpClientFactory>(), sp.GetService<IVaultAuthenticationProvider>()));
 
         if (Options.Pki.Enabled)
             services.AddSingleton<IVaultSecretBackend>(sp =>
-                new PkiSecretBackend(Options.Pki, new HttpClient { BaseAddress = Options.Uri }, sp.GetService<IVaultAuthenticationProvider>()));
+                new PkiSecretBackend(Options.Pki, sp.GetRequiredService<IHttpClientFactory>(), sp.GetService<IVaultAuthenticationProvider>()));
 
         services.AddLogging();
 
