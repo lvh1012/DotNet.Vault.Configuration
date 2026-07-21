@@ -44,6 +44,7 @@ public class VaultConfigurationSource : IConfigurationSource
 
         services.AddSingleton(Options);
         services.AddSingleton<VaultClient>();
+        services.AddSingleton(new HttpClient { BaseAddress = Options.Uri, Timeout = Options.Timeout });
         services.AddSingleton<SecretRefresher>();
 
         if (Options.Authentication.Token != null)
@@ -52,15 +53,15 @@ public class VaultConfigurationSource : IConfigurationSource
 
         if (Options.Kv.Enabled)
             services.AddSingleton<IVaultSecretBackend>(sp =>
-                new KvSecretBackend(Options.Kv, new HttpClient { BaseAddress = Options.Uri }));
+                new KvSecretBackend(Options.Kv, new HttpClient { BaseAddress = Options.Uri }, sp.GetService<IVaultAuthenticationProvider>()));
 
         if (Options.Database.Enabled)
             services.AddSingleton<IVaultSecretBackend>(sp =>
-                new DatabaseSecretBackend(Options.Database, new HttpClient { BaseAddress = Options.Uri }));
+                new DatabaseSecretBackend(Options.Database, new HttpClient { BaseAddress = Options.Uri }, sp.GetService<IVaultAuthenticationProvider>()));
 
         if (Options.Pki.Enabled)
             services.AddSingleton<IVaultSecretBackend>(sp =>
-                new PkiSecretBackend(Options.Pki, new HttpClient { BaseAddress = Options.Uri }));
+                new PkiSecretBackend(Options.Pki, new HttpClient { BaseAddress = Options.Uri }, sp.GetService<IVaultAuthenticationProvider>()));
 
         services.AddLogging();
 

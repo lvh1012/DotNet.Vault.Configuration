@@ -1,4 +1,5 @@
 using System.Text.Json;
+using DotNet.Vault.Configuration.Authentication;
 using DotNet.Vault.Configuration.Core;
 
 namespace DotNet.Vault.Configuration.Backends;
@@ -17,16 +18,18 @@ public class DatabaseSecretBackend : IVaultSecretBackend
 {
     private readonly DatabaseSecretBackendOptions _options;
     private readonly HttpClient _httpClient;
+    private readonly IVaultAuthenticationProvider? _authProvider;
 
-    /// <summary>
     /// Initializes a new instance of the <see cref="DatabaseSecretBackend"/> class.
     /// </summary>
     /// <param name="options">The database backend options.</param>
     /// <param name="httpClient">The HTTP client used to call the Vault API.</param>
-    public DatabaseSecretBackend(DatabaseSecretBackendOptions options, HttpClient httpClient)
+    /// <param name="authProvider">The optional authentication provider used to attach an <c>X-Vault-Token</c> header to outgoing requests.</param>
+    public DatabaseSecretBackend(DatabaseSecretBackendOptions options, HttpClient httpClient, IVaultAuthenticationProvider? authProvider = null)
     {
         _options = options;
         _httpClient = httpClient;
+        _authProvider = authProvider;
     }
 
     /// <inheritdoc />
@@ -35,12 +38,19 @@ public class DatabaseSecretBackend : IVaultSecretBackend
     /// <inheritdoc />
     public async Task<SecretResult> GetSecretsAsync(SecretRequest request, CancellationToken cancellationToken = default)
     {
-        var response = await _httpClient.GetAsync($"/v1/{request.Path}", cancellationToken);
+        var httpRequest = new HttpRequestMessage(HttpMethod.Get, $"/v1/{request.Path}");
+        if (_authProvider is not null)
+        {
+            var token = await _authProvider.GetTokenAsync(cancellationToken).ConfigureAwait(false);
+            if (!string.IsNullOrEmpty(token))
+                httpRequest.Headers.Add("X-Vault-Token", token);
+        }
+
+        var response = await _httpClient.SendAsync(httpRequest, cancellationToken).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
 
-        var content = await response.Content.ReadAsStringAsync(cancellationToken);
+        var content = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         var result = JsonSerializer.Deserialize<JsonElement>(content);
-
         var secrets = new Dictionary<string, string>();
 
         if (result.TryGetProperty("data", out var data))
