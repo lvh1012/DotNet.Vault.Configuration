@@ -28,7 +28,7 @@ namespace DotNet.Vault.Configuration.Refresh;
 /// </remarks>
 public class SecretRefresher : IDisposable, IHostedService
 {
-    private readonly VaultClient _client;
+    private readonly Lazy<VaultClient> _client;
     private readonly VaultOptions _options;
     private readonly ILogger<SecretRefresher> _logger;
     private readonly Dictionary<string, SecretMetadata> _secretMetadata = new();
@@ -46,11 +46,11 @@ public class SecretRefresher : IDisposable, IHostedService
     /// <summary>
     /// Initializes a new instance of the <see cref="SecretRefresher"/> class.
     /// </summary>
-    /// <param name="client">The Vault client used to interact with the Vault server.</param>
+    /// <param name="client">The lazy Vault client used to interact with the Vault server.</param>
     /// <param name="options">The configured <see cref="VaultOptions"/>.</param>
     /// <param name="logger">The logger used for diagnostic output.</param>
     public SecretRefresher(
-        VaultClient client,
+        Lazy<VaultClient> client,
         VaultOptions options,
         ILogger<SecretRefresher> logger)
     {

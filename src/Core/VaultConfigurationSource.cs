@@ -46,6 +46,7 @@ public class VaultConfigurationSource : IConfigurationSource
 
         services.AddSingleton(Options);
         services.AddSingleton<VaultClient>();
+        services.AddSingleton(sp => new Lazy<VaultClient>(() => sp.GetRequiredService<VaultClient>()));
         services.AddSingleton<SecretRefresher>();
 
         // Register the named Vault HttpClient, auth delegating handler, and fallback token provider.
@@ -82,15 +83,24 @@ public class VaultConfigurationSource : IConfigurationSource
 
         if (Options.Kv.Enabled)
             services.AddSingleton<IVaultSecretBackend>(sp =>
-                new KvSecretBackend(Options.Kv, sp.GetRequiredService<IHttpClientFactory>()));
+                new KvSecretBackend(
+                    Options.Kv,
+                    sp.GetRequiredService<IHttpClientFactory>(),
+                    sp.GetRequiredService<SecretRefresher>()));
 
         if (Options.Database.Enabled)
             services.AddSingleton<IVaultSecretBackend>(sp =>
-                new DatabaseSecretBackend(Options.Database, sp.GetRequiredService<IHttpClientFactory>()));
+                new DatabaseSecretBackend(
+                    Options.Database,
+                    sp.GetRequiredService<IHttpClientFactory>(),
+                    sp.GetRequiredService<SecretRefresher>()));
 
         if (Options.Pki.Enabled)
             services.AddSingleton<IVaultSecretBackend>(sp =>
-                new PkiSecretBackend(Options.Pki, sp.GetRequiredService<IHttpClientFactory>()));
+                new PkiSecretBackend(
+                    Options.Pki,
+                    sp.GetRequiredService<IHttpClientFactory>(),
+                    sp.GetRequiredService<SecretRefresher>()));
 
         services.AddLogging();
 

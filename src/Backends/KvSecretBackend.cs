@@ -3,6 +3,7 @@ using System.Text.Json;
 using DotNet.Vault.Configuration.Authentication;
 using DotNet.Vault.Configuration.Core;
 using DotNet.Vault.Configuration.Http;
+using DotNet.Vault.Configuration.Refresh;
 
 namespace DotNet.Vault.Configuration.Backends;
 
@@ -21,6 +22,7 @@ public class KvSecretBackend : IVaultSecretBackend
 {
     private readonly KvSecretBackendOptions _options;
     private readonly IHttpClientFactory _httpClientFactory;
+    private readonly SecretRefresher _refresher;
     private readonly IVaultAuthenticationProvider? _authProvider;
 
     /// <summary>
@@ -28,11 +30,13 @@ public class KvSecretBackend : IVaultSecretBackend
     /// </summary>
     /// <param name="options">The KV backend options.</param>
     /// <param name="httpClientFactory">The HTTP client factory used to create Vault API clients.</param>
+    /// <param name="refresher">The refresher used to track secret lease metadata.</param>
     /// <param name="authProvider">The optional authentication provider used to attach an <c>X-Vault-Token</c> header to outgoing requests.</param>
-    public KvSecretBackend(KvSecretBackendOptions options, IHttpClientFactory httpClientFactory, IVaultAuthenticationProvider? authProvider = null)
+    public KvSecretBackend(KvSecretBackendOptions options, IHttpClientFactory httpClientFactory, SecretRefresher refresher, IVaultAuthenticationProvider? authProvider = null)
     {
         _options = options;
         _httpClientFactory = httpClientFactory;
+        _refresher = refresher;
         _authProvider = authProvider;
     }
 
@@ -77,12 +81,15 @@ public class KvSecretBackend : IVaultSecretBackend
             }
         }
 
-        return new SecretResult
+        var secretResult = new SecretResult
         {
             Secrets = secrets,
             LeaseDuration = null,
             Renewable = false
         };
+
+        _refresher.TrackSecret(request.Path, secretResult);
+        return secretResult;
     }
 
     /// <inheritdoc />

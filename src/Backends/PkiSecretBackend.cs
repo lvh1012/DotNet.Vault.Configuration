@@ -5,6 +5,7 @@ using System.Text.Json;
 using DotNet.Vault.Configuration.Authentication;
 using DotNet.Vault.Configuration.Core;
 using DotNet.Vault.Configuration.Http;
+using DotNet.Vault.Configuration.Refresh;
 
 namespace DotNet.Vault.Configuration.Backends;
 
@@ -23,6 +24,7 @@ public class PkiSecretBackend : IVaultSecretBackend
 {
     private readonly PkiSecretBackendOptions _options;
     private readonly IHttpClientFactory _httpClientFactory;
+    private readonly SecretRefresher _refresher;
     private readonly IVaultAuthenticationProvider? _authProvider;
 
     /// <summary>
@@ -30,11 +32,13 @@ public class PkiSecretBackend : IVaultSecretBackend
     /// </summary>
     /// <param name="options">The PKI backend options.</param>
     /// <param name="httpClientFactory">The HTTP client factory used to create Vault API clients.</param>
+    /// <param name="refresher">The refresher used to track secret lease metadata.</param>
     /// <param name="authProvider">The optional authentication provider used to attach an <c>X-Vault-Token</c> header to outgoing requests.</param>
-    public PkiSecretBackend(PkiSecretBackendOptions options, IHttpClientFactory httpClientFactory, IVaultAuthenticationProvider? authProvider = null)
+    public PkiSecretBackend(PkiSecretBackendOptions options, IHttpClientFactory httpClientFactory, SecretRefresher refresher, IVaultAuthenticationProvider? authProvider = null)
     {
         _options = options;
         _httpClientFactory = httpClientFactory;
+        _refresher = refresher;
         _authProvider = authProvider;
     }
 
@@ -93,7 +97,7 @@ public class PkiSecretBackend : IVaultSecretBackend
             ? TimeSpan.FromSeconds(leaseDurationProp.GetInt32())
             : (TimeSpan?)null;
 
-        return new SecretResult
+        var secretResult = new SecretResult
         {
             Secrets = secrets,
             LeaseId = leaseId,
@@ -101,6 +105,9 @@ public class PkiSecretBackend : IVaultSecretBackend
             Renewable = false,
             ExpireTime = leaseDuration.HasValue ? DateTimeOffset.UtcNow.Add(leaseDuration.Value) : null
         };
+
+        _refresher.TrackSecret(request.Path, secretResult);
+        return secretResult;
     }
 
     /// <inheritdoc />

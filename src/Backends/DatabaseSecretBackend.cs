@@ -3,6 +3,7 @@ using System.Text.Json;
 using DotNet.Vault.Configuration.Authentication;
 using DotNet.Vault.Configuration.Core;
 using DotNet.Vault.Configuration.Http;
+using DotNet.Vault.Configuration.Refresh;
 
 namespace DotNet.Vault.Configuration.Backends;
 
@@ -20,6 +21,7 @@ public class DatabaseSecretBackend : IVaultSecretBackend
 {
     private readonly DatabaseSecretBackendOptions _options;
     private readonly IHttpClientFactory _httpClientFactory;
+    private readonly SecretRefresher _refresher;
     private readonly IVaultAuthenticationProvider? _authProvider;
 
     /// <summary>
@@ -27,11 +29,13 @@ public class DatabaseSecretBackend : IVaultSecretBackend
     /// </summary>
     /// <param name="options">The database backend options.</param>
     /// <param name="httpClientFactory">The HTTP client factory used to create Vault API clients.</param>
+    /// <param name="refresher">The refresher used to track secret lease metadata.</param>
     /// <param name="authProvider">The optional authentication provider used to attach an <c>X-Vault-Token</c> header to outgoing requests.</param>
-    public DatabaseSecretBackend(DatabaseSecretBackendOptions options, IHttpClientFactory httpClientFactory, IVaultAuthenticationProvider? authProvider = null)
+    public DatabaseSecretBackend(DatabaseSecretBackendOptions options, IHttpClientFactory httpClientFactory, SecretRefresher refresher, IVaultAuthenticationProvider? authProvider = null)
     {
         _options = options;
         _httpClientFactory = httpClientFactory;
+        _refresher = refresher;
         _authProvider = authProvider;
     }
 
@@ -74,7 +78,7 @@ public class DatabaseSecretBackend : IVaultSecretBackend
             : (TimeSpan?)null;
         var renewable = result.TryGetProperty("renewable", out var renewableProp) && renewableProp.GetBoolean();
 
-        return new SecretResult
+        var secretResult = new SecretResult
         {
             Secrets = secrets,
             LeaseId = leaseId,
@@ -82,6 +86,9 @@ public class DatabaseSecretBackend : IVaultSecretBackend
             Renewable = renewable,
             ExpireTime = leaseDuration.HasValue ? DateTimeOffset.UtcNow.Add(leaseDuration.Value) : null
         };
+
+        _refresher.TrackSecret(request.Path, secretResult);
+        return secretResult;
     }
 
     /// <inheritdoc />
