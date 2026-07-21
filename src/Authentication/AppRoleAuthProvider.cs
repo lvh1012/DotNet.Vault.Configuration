@@ -71,7 +71,7 @@ public class AppRoleAuthProvider : IVaultAuthenticationProvider
             System.Text.Encoding.UTF8,
             "application/json");
 
-        var client = _httpClientFactory.CreateClient(VaultHttpClientFactoryExtensions.VaultClientName);
+        using var client = _httpClientFactory.CreateClient(VaultHttpClientFactoryExtensions.VaultAuthClientName);
         var response = await client.PostAsync($"/v1/auth/{_options.AppRolePath}/login", content, cancellationToken);
         response.EnsureSuccessStatusCode();
 

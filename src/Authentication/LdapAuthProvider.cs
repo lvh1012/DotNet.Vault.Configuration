@@ -67,7 +67,7 @@ public class LdapAuthProvider : IVaultAuthenticationProvider
             System.Text.Encoding.UTF8,
             "application/json");
 
-        var client = _httpClientFactory.CreateClient(VaultHttpClientFactoryExtensions.VaultClientName);
+        using var client = _httpClientFactory.CreateClient(VaultHttpClientFactoryExtensions.VaultAuthClientName);
         var response = await client.PostAsync($"/v1/auth/{_options.LdapPath}/login/{_options.Username}", content, cancellationToken);
         response.EnsureSuccessStatusCode();
 

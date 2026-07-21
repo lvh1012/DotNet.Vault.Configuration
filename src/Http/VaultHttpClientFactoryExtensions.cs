@@ -16,12 +16,20 @@ namespace DotNet.Vault.Configuration.Http;
 public static class VaultHttpClientFactoryExtensions
 {
     /// <summary>
-    /// The named HttpClient identifier for Vault clients.
+    /// The named HttpClient identifier for authenticated Vault clients.
     /// </summary>
     public const string VaultClientName = "vault-client";
 
     /// <summary>
-    /// Register a named HttpClient configured for Vault with auth handler and Polly retry.
+    /// The named HttpClient identifier for unauthenticated Vault login requests.
+    /// </summary>
+    public const string VaultAuthClientName = "vault-auth-client";
+
+    /// <summary>
+    /// Register named HttpClients configured for Vault.
+    /// <c>vault-client</c> includes the auth delegating handler and Polly retry.
+    /// <c>vault-auth-client</c> is unauthenticated and used by auth providers
+    /// to call login endpoints without recursively invoking the auth handler.
     /// </summary>
     public static IHttpClientBuilder AddVaultHttpClient(
         this IServiceCollection services,
@@ -30,6 +38,12 @@ public static class VaultHttpClientFactoryExtensions
         services.AddTransient<VaultAuthDelegatingHandler>();
         services.TryAddSingleton<IVaultAuthenticationProvider>(sp =>
             new TokenAuthProvider(Options.Create(options.Authentication.Token ?? new TokenAuthenticationOptions())));
+
+        services.AddHttpClient(VaultAuthClientName, client =>
+        {
+            client.BaseAddress = options.Uri;
+            client.Timeout = options.Timeout;
+        });
 
         return services.AddHttpClient(VaultClientName, client =>
         {
