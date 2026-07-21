@@ -1,6 +1,9 @@
 using DotNet.Vault.Configuration.Core;
 using DotNet.Vault.Configuration.Core.Exceptions;
+using DotNet.Vault.Configuration.Http;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using System.Net.Http;
 using System.Text.Json;
 
 namespace DotNet.Vault.Configuration.Authentication;
@@ -18,22 +21,26 @@ namespace DotNet.Vault.Configuration.Authentication;
 public class KubernetesAuthProvider : IVaultAuthenticationProvider
 {
     private readonly KubernetesAuthenticationOptions _options;
-    private readonly HttpClient _httpClient;
+    private readonly IHttpClientFactory _httpClientFactory;
+    private readonly ILogger<KubernetesAuthProvider> _logger;
     private string? _cachedToken;
     private DateTimeOffset? _tokenExpiry;
 
     /// <summary>
     /// Creates a new <see cref="KubernetesAuthProvider"/> bound to the
-    /// supplied options and <see cref="HttpClient"/>.
+    /// supplied options, <see cref="IHttpClientFactory"/>, and logger.
     /// </summary>
     /// <param name="options">The Kubernetes authentication options.</param>
-    /// <param name="httpClient">The HTTP client used to call the Vault login endpoint.</param>
+    /// <param name="httpClientFactory">The HTTP client factory used to create Vault API clients.</param>
+    /// <param name="logger">The logger used for diagnostic output.</param>
     public KubernetesAuthProvider(
         IOptions<KubernetesAuthenticationOptions> options,
-        HttpClient httpClient)
+        IHttpClientFactory httpClientFactory,
+        ILogger<KubernetesAuthProvider> logger)
     {
         _options = options.Value;
-        _httpClient = httpClient;
+        _httpClientFactory = httpClientFactory;
+        _logger = logger;
     }
 
     /// <inheritdoc />
@@ -67,7 +74,8 @@ public class KubernetesAuthProvider : IVaultAuthenticationProvider
             System.Text.Encoding.UTF8,
             "application/json");
 
-        var response = await _httpClient.PostAsync($"/v1/auth/{_options.KubernetesRolePath}/login", content, cancellationToken);
+        var client = _httpClientFactory.CreateClient(VaultHttpClientFactoryExtensions.VaultClientName);
+        var response = await client.PostAsync($"/v1/auth/{_options.KubernetesRolePath}/login", content, cancellationToken);
         response.EnsureSuccessStatusCode();
 
         var responseContent = await response.Content.ReadAsStringAsync(cancellationToken);
@@ -77,6 +85,10 @@ public class KubernetesAuthProvider : IVaultAuthenticationProvider
 
         var leaseDuration = result.GetProperty("auth").GetProperty("lease_duration").GetInt32();
         _tokenExpiry = DateTimeOffset.UtcNow.AddSeconds(leaseDuration);
+
+        _logger.LogInformation(
+            "Refreshed Kubernetes Vault token; lease duration {LeaseDuration}s",
+            leaseDuration);
     }
 
     /// <inheritdoc />
