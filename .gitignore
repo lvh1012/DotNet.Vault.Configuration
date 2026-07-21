@@ -1,0 +1,23 @@
+# Build artifacts
+bin/
+obj/
+*.dll
+*.pdb
+*.exe
+
+# IDE
+.vs/
+.idea/
+*.user
+*.suo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test results
+TestResults/
+coverage/
+
+# SDD scratch
+.superpowers/
