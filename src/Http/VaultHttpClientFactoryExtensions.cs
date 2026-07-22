@@ -82,48 +82,109 @@ public static class VaultHttpClientFactoryExtensions
         });
     }
 
-    private static SocketsHttpHandler CreatePrimaryHandler(VaultOptions options)
+    private static HttpMessageHandler CreatePrimaryHandler(VaultOptions options)
     {
         var ssl = options.Ssl;
         var handler = new SocketsHttpHandler();
-        var sslOptions = handler.SslOptions;
-        sslOptions.EnabledSslProtocols = ssl.Protocol;
-        sslOptions.CertificateRevocationCheckMode = ssl.CheckCertificateRevocation
-            ? X509RevocationMode.Online
-            : X509RevocationMode.NoCheck;
-        sslOptions.TargetHost = ssl.ServerName ?? options.Uri.Host;
+        List<X509Certificate2>? ownedCertificates = null;
 
-        var clientCertificate = ssl.ClientCertificate ??
-            (ssl.ClientCertificatePath is null
-                ? null
-                : X509CertificateLoader.LoadPkcs12FromFile(
-                    ssl.ClientCertificatePath,
-                    ssl.ClientCertificatePassword));
-        if (clientCertificate is not null)
+        try
         {
-            sslOptions.ClientCertificates = new X509CertificateCollection { clientCertificate };
-        }
+            var sslOptions = handler.SslOptions;
+            sslOptions.EnabledSslProtocols = ssl.Protocol;
+            sslOptions.CertificateRevocationCheckMode = ssl.CheckCertificateRevocation
+                ? X509RevocationMode.Online
+                : X509RevocationMode.NoCheck;
+            sslOptions.TargetHost = ssl.ServerName ?? options.Uri.Host;
 
-        var caCertificate = ssl.CaCertificate ??
-            (ssl.CaCertificatePath is null
-                ? null
-                : X509CertificateLoader.LoadCertificateFromFile(ssl.CaCertificatePath));
-        if (caCertificate is not null)
-        {
-            var chainPolicy = new X509ChainPolicy
+            var clientCertificate = ssl.ClientCertificate;
+            if (clientCertificate is null && ssl.ClientCertificatePath is not null)
             {
-                TrustMode = X509ChainTrustMode.CustomRootTrust
-            };
-            chainPolicy.CustomTrustStore.Add(caCertificate);
-            sslOptions.CertificateChainPolicy = chainPolicy;
-        }
+                clientCertificate = X509CertificateLoader.LoadPkcs12FromFile(
+                    ssl.ClientCertificatePath,
+                    ssl.ClientCertificatePassword);
+                (ownedCertificates ??= []).Add(clientCertificate);
+            }
 
-        if (ssl.SkipVerify)
+            if (clientCertificate is not null)
+            {
+                sslOptions.ClientCertificates = new X509CertificateCollection { clientCertificate };
+            }
+
+            var caCertificate = ssl.CaCertificate;
+            if (caCertificate is null && ssl.CaCertificatePath is not null)
+            {
+                caCertificate = X509CertificateLoader.LoadCertificateFromFile(ssl.CaCertificatePath);
+                (ownedCertificates ??= []).Add(caCertificate);
+            }
+
+            if (caCertificate is not null)
+            {
+                var chainPolicy = new X509ChainPolicy
+                {
+                    TrustMode = X509ChainTrustMode.CustomRootTrust
+                };
+                chainPolicy.CustomTrustStore.Add(caCertificate);
+                sslOptions.CertificateChainPolicy = chainPolicy;
+            }
+
+            if (ssl.SkipVerify)
+            {
+                sslOptions.RemoteCertificateValidationCallback =
+                    static (_, _, _, _) => true;
+            }
+
+            return ownedCertificates is null
+                ? handler
+                : new CertificateDisposingHandler(handler, ownedCertificates);
+        }
+        catch
         {
-            sslOptions.RemoteCertificateValidationCallback =
-                static (_, _, _, _) => true;
+            handler.Dispose();
+
+            if (ownedCertificates is not null)
+            {
+                foreach (var certificate in ownedCertificates)
+                {
+                    certificate.Dispose();
+                }
+            }
+
+            throw;
+        }
+    }
+    private sealed class CertificateDisposingHandler : DelegatingHandler
+    {
+        private readonly List<X509Certificate2> _ownedCertificates;
+
+        public CertificateDisposingHandler(
+            HttpMessageHandler innerHandler,
+            List<X509Certificate2> ownedCertificates)
+        {
+            InnerHandler = innerHandler;
+            _ownedCertificates = ownedCertificates;
         }
 
-        return handler;
+        protected override void Dispose(bool disposing)
+        {
+            if (!disposing)
+            {
+                base.Dispose(disposing);
+                return;
+            }
+
+            try
+            {
+                base.Dispose(disposing);
+            }
+            finally
+            {
+                foreach (var certificate in _ownedCertificates)
+                {
+                    certificate.Dispose();
+                }
+            }
+        }
     }
+
 }

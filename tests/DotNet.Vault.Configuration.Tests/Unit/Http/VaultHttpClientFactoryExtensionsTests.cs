@@ -58,7 +58,10 @@ public class VaultHttpClientFactoryExtensionsTests
 
         using var provider = services.BuildServiceProvider();
         using var scope = provider.CreateScope();
-        var handler = GetPrimaryHandler(scope.ServiceProvider, VaultHttpClientFactoryExtensions.VaultClientName);
+        using var primaryHandler = GetConfiguredPrimaryHandler(
+            scope.ServiceProvider,
+            VaultHttpClientFactoryExtensions.VaultClientName);
+        var handler = GetSocketsPrimaryHandler(primaryHandler);
 
         Assert.Equal(SslProtocols.Tls12, handler.SslOptions.EnabledSslProtocols);
         Assert.Equal(X509RevocationMode.Online, handler.SslOptions.CertificateRevocationCheckMode);
@@ -104,12 +107,19 @@ public class VaultHttpClientFactoryExtensionsTests
 
             using var provider = services.BuildServiceProvider();
             using var scope = provider.CreateScope();
+            using var vaultPrimaryHandler = GetConfiguredPrimaryHandler(
+                scope.ServiceProvider,
+                VaultHttpClientFactoryExtensions.VaultClientName);
             AssertSslConfiguration(
-                GetPrimaryHandler(scope.ServiceProvider, VaultHttpClientFactoryExtensions.VaultClientName),
+                GetSocketsPrimaryHandler(vaultPrimaryHandler),
                 caCertificate,
                 clientCertificate);
+
+            using var authPrimaryHandler = GetConfiguredPrimaryHandler(
+                scope.ServiceProvider,
+                VaultHttpClientFactoryExtensions.VaultAuthClientName);
             AssertSslConfiguration(
-                GetPrimaryHandler(scope.ServiceProvider, VaultHttpClientFactoryExtensions.VaultAuthClientName),
+                GetSocketsPrimaryHandler(authPrimaryHandler),
                 caCertificate,
                 clientCertificate);
         }
@@ -119,7 +129,99 @@ public class VaultHttpClientFactoryExtensionsTests
         }
     }
 
-    private static SocketsHttpHandler GetPrimaryHandler(IServiceProvider services, string clientName)
+    [Fact]
+    public void AddVaultHttpClient_CertificatePaths_DisposesLoadedCertificatesWithEachPrimaryHandler()
+    {
+        const string clientCertificatePassword = "test-password";
+        var certificateDirectory = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(certificateDirectory);
+
+        try
+        {
+            using var caCertificate = CreateCertificate("CN=Test CA");
+            using var clientCertificate = CreateCertificate("CN=Test Client");
+            var caCertificatePath = Path.Combine(certificateDirectory, "ca.cer");
+            var clientCertificatePath = Path.Combine(certificateDirectory, "client.pfx");
+            File.WriteAllBytes(caCertificatePath, caCertificate.Export(X509ContentType.Cert));
+            File.WriteAllBytes(clientCertificatePath, clientCertificate.Export(X509ContentType.Pfx, clientCertificatePassword));
+
+            var services = new ServiceCollection();
+            services.AddVaultHttpClient(new VaultOptions
+            {
+                Uri = new Uri("https://vault.example.test:8200"),
+                Ssl = new VaultSslOptions
+                {
+                    CaCertificatePath = caCertificatePath,
+                    ClientCertificatePath = clientCertificatePath,
+                    ClientCertificatePassword = clientCertificatePassword
+                }
+            });
+
+            using var provider = services.BuildServiceProvider();
+            using var scope = provider.CreateScope();
+            var vaultPrimaryHandler = GetConfiguredPrimaryHandler(
+                scope.ServiceProvider,
+                VaultHttpClientFactoryExtensions.VaultClientName);
+            var authPrimaryHandler = GetConfiguredPrimaryHandler(
+                scope.ServiceProvider,
+                VaultHttpClientFactoryExtensions.VaultAuthClientName);
+            var vaultSslOptions = GetSocketsPrimaryHandler(vaultPrimaryHandler).SslOptions;
+            var authSslOptions = GetSocketsPrimaryHandler(authPrimaryHandler).SslOptions;
+            var loadedCertificates = new[]
+            {
+                Assert.IsType<X509Certificate2>(vaultSslOptions.ClientCertificates!.Cast<X509Certificate2>().Single()),
+                Assert.IsType<X509Certificate2>(vaultSslOptions.CertificateChainPolicy!.CustomTrustStore.Cast<X509Certificate2>().Single()),
+                Assert.IsType<X509Certificate2>(authSslOptions.ClientCertificates!.Cast<X509Certificate2>().Single()),
+                Assert.IsType<X509Certificate2>(authSslOptions.CertificateChainPolicy!.CustomTrustStore.Cast<X509Certificate2>().Single())
+            };
+
+            vaultPrimaryHandler.Dispose();
+            authPrimaryHandler.Dispose();
+
+            foreach (var certificate in loadedCertificates)
+            {
+                Assert.Throws<CryptographicException>(() => certificate.Export(X509ContentType.Cert));
+            }
+        }
+        finally
+        {
+            Directory.Delete(certificateDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void AddVaultHttpClient_SuppliedCertificates_RemainUsableAfterPrimaryHandlerDisposal()
+    {
+        using var caCertificate = CreateCertificate("CN=Test CA");
+        using var clientCertificate = CreateCertificate("CN=Test Client");
+        var services = new ServiceCollection();
+        services.AddVaultHttpClient(new VaultOptions
+        {
+            Uri = new Uri("https://vault.example.test:8200"),
+            Ssl = new VaultSslOptions
+            {
+                CaCertificate = caCertificate,
+                ClientCertificate = clientCertificate
+            }
+        });
+
+        using var provider = services.BuildServiceProvider();
+        using var scope = provider.CreateScope();
+        using var vaultPrimaryHandler = GetConfiguredPrimaryHandler(
+            scope.ServiceProvider,
+            VaultHttpClientFactoryExtensions.VaultClientName);
+        using var authPrimaryHandler = GetConfiguredPrimaryHandler(
+            scope.ServiceProvider,
+            VaultHttpClientFactoryExtensions.VaultAuthClientName);
+
+        vaultPrimaryHandler.Dispose();
+        authPrimaryHandler.Dispose();
+
+        Assert.NotEmpty(caCertificate.Export(X509ContentType.Cert));
+        Assert.NotEmpty(clientCertificate.Export(X509ContentType.Cert));
+    }
+
+    private static HttpMessageHandler GetConfiguredPrimaryHandler(IServiceProvider services, string clientName)
     {
         var builder = services.GetRequiredService<HttpMessageHandlerBuilder>();
         builder.Name = clientName;
@@ -130,7 +232,17 @@ public class VaultHttpClientFactoryExtensionsTests
             action(builder);
         }
 
-        return Assert.IsType<SocketsHttpHandler>(builder.PrimaryHandler);
+        return builder.PrimaryHandler;
+    }
+
+    private static SocketsHttpHandler GetSocketsPrimaryHandler(HttpMessageHandler primaryHandler)
+    {
+        return primaryHandler switch
+        {
+            SocketsHttpHandler handler => handler,
+            DelegatingHandler { InnerHandler: SocketsHttpHandler handler } => handler,
+            _ => throw new Xunit.Sdk.XunitException("Expected a SocketsHttpHandler primary handler.")
+        };
     }
 
     private static void AssertSslConfiguration(
