@@ -1,3 +1,5 @@
+using DotNet.Vault.Configuration.Security;
+
 namespace DotNet.Vault.Configuration.Core;
 
 /// <summary>
@@ -22,6 +24,11 @@ public class VaultOptions
     /// </summary>
     /// <value>The namespace identifier, or <see langword="null"/> when not using namespaces.</value>
     public string? Namespace { get; set; }
+
+    /// <summary>
+    /// Gets or sets the SSL/TLS options used for connections to Vault.
+    /// </summary>
+    public VaultSslOptions Ssl { get; set; } = new();
 
     /// <summary>
     /// Gets or sets the per-request timeout applied to HTTP calls against Vault.
