@@ -61,7 +61,10 @@ public class VaultConfigurationSourceTests
             refresher = new SecretRefresher(
                 source.Options,
                 NullLogger<SecretRefresher>.Instance,
-                scheduler);
+                scheduler,
+                new VaultLeaseRenewer(
+                    Mock.Of<IHttpClientFactory>(),
+                    NullLogger<VaultLeaseRenewer>.Instance));
             var client = new VaultClient(
                 Mock.Of<IHttpClientFactory>(),
                 source.Options,
@@ -114,6 +117,18 @@ public class VaultConfigurationSourceTests
         var exception = Assert.Throws<InvalidOperationException>(() => source.Build(new ConfigurationBuilder()));
 
         Assert.Contains("ServiceProviderFactory must return an IDisposable service provider.", exception.Message);
+    }
+
+    [Fact]
+    public void Build_DefaultServices_RegistersVaultLeaseRenewerForSecretRefresher()
+    {
+        var builder = new ConfigurationBuilder()
+            .AddVault(_ => { });
+
+        var configuration = builder.Build();
+        using var configurationLifetime = Assert.IsAssignableFrom<IDisposable>(configuration);
+
+        Assert.NotNull(configuration);
     }
 
     private sealed class ManualRefreshScheduler : ISecretRefreshScheduler

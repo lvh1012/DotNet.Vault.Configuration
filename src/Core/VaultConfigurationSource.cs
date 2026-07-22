@@ -18,8 +18,8 @@ namespace DotNet.Vault.Configuration.Core;
 /// <see cref="Build"/> stands up a self-contained
 /// <see cref="ServiceProvider"/> containing the authentication providers and
 /// secret backends required by the requested backends, then resolves the
-/// <see cref="VaultClient"/>, <see cref="SecretRefresher"/>, and
-/// <see cref="ILogger{T}"/> needed by the provider. The provider owns this
+/// <see cref="VaultClient"/>, <see cref="VaultLeaseRenewer"/>, <see cref="SecretRefresher"/>,
+/// and <see cref="ILogger{T}"/> needed by the provider. The provider owns this
 /// service provider and disposes it when its configuration lifetime ends.
 /// <c>Microsoft.Extensions.Options.Options.Create{T}(T)</c> wrapper is
 /// used to bind each authentication options block to its corresponding
@@ -60,6 +60,8 @@ public class VaultConfigurationSource : IConfigurationSource
 
         services.AddSingleton(Options);
         services.AddSingleton<VaultClient>();
+        services.AddSingleton<ISecretRefreshScheduler, TimerSecretRefreshScheduler>();
+        services.AddSingleton<VaultLeaseRenewer>();
         services.AddSingleton<SecretRefresher>();
 
         // Register the named Vault HttpClient, auth delegating handler, and fallback token provider.

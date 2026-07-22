@@ -23,7 +23,13 @@ public class VaultConfigurationProviderTests
             .ReturnsAsync(new SecretResult { Secrets = new Dictionary<string, string> { ["setting"] = "initial" } })
             .ReturnsAsync(new SecretResult { Secrets = new Dictionary<string, string> { ["setting"] = "refreshed" } });
 
-        using var refresher = new SecretRefresher(options, Mock.Of<ILogger<SecretRefresher>>());
+        using var refresher = new SecretRefresher(
+            options,
+            Mock.Of<ILogger<SecretRefresher>>(),
+            new NoopRefreshScheduler(),
+            new VaultLeaseRenewer(
+                Mock.Of<IHttpClientFactory>(),
+                Mock.Of<ILogger<VaultLeaseRenewer>>()));
         using var provider = new VaultConfigurationProvider(
             new VaultClient(
                 Mock.Of<IHttpClientFactory>(),
@@ -68,5 +74,20 @@ public class VaultConfigurationProviderTests
 
         Assert.NotNull(refreshLoop);
         await Assert.IsAssignableFrom<Task>(refreshLoop.Invoke(refresher, null));
+    }
+
+    private sealed class NoopRefreshScheduler : ISecretRefreshScheduler
+    {
+        public void Start(TimeSpan interval, Func<Task> refresh)
+        {
+        }
+
+        public void Stop()
+        {
+        }
+
+        public void Dispose()
+        {
+        }
     }
 }

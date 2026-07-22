@@ -1,4 +1,6 @@
+using System.Collections.Concurrent;
 using DotNet.Vault.Configuration.Backends;
+using DotNet.Vault.Configuration.Core.Exceptions;
 using DotNet.Vault.Configuration.Core;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -21,18 +23,20 @@ namespace DotNet.Vault.Configuration.Refresh;
 /// </para>
 /// <para>
 /// When <see cref="VaultRefreshOptions.Enabled"/> is <see langword="true"/>,
-/// <see cref="StartAsync"/> schedules a periodic timer that invokes the
-/// <see cref="OnSecretsRefreshed"/> event handler; subscribers (typically
-/// the configuration provider) perform the actual re-load of secret material.
+/// <see cref="StartAsync"/> schedules periodic refresh cycles. Each due cycle
+/// renews renewable leases before invoking <see cref="OnSecretsRefreshed"/>;
+/// subscribers (typically the configuration provider) then re-load secret
+/// material. A failed renewal marks its lease non-renewable for later cycles.
 /// </para>
 /// </remarks>
 public class SecretRefresher : IDisposable, IHostedService
 {
     private readonly VaultOptions _options;
     private readonly ILogger<SecretRefresher> _logger;
-    private readonly Dictionary<string, SecretMetadata> _secretMetadata = new();
+    private readonly ConcurrentDictionary<string, SecretMetadata> _secretMetadata = new();
     private readonly ISecretRefreshScheduler _scheduler;
-    private bool _isRefreshing;
+    private readonly VaultLeaseRenewer _leaseRenewer;
+    private int _isRefreshing;
 
     /// <summary>
     /// Raised at the end of each refresh cycle after the refresher determines
@@ -43,31 +47,22 @@ public class SecretRefresher : IDisposable, IHostedService
     public event Func<Task>? OnSecretsRefreshed;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="SecretRefresher"/> class.
-    /// </summary>
-    /// <param name="options">The configured <see cref="VaultOptions"/>.</param>
-    /// <param name="logger">The logger used for diagnostic output.</param>
-    public SecretRefresher(
-        VaultOptions options,
-        ILogger<SecretRefresher> logger)
-        : this(options, logger, new TimerSecretRefreshScheduler())
-    {
-    }
-
-    /// <summary>
-    /// Initializes a secret refresher with the supplied refresh scheduler.
+    /// Initializes a secret refresher with the supplied scheduler and lease renewer.
     /// </summary>
     /// <param name="options">The Vault options controlling refresh behavior.</param>
     /// <param name="logger">The logger used for diagnostic output.</param>
     /// <param name="scheduler">The scheduler that drives refresh cycles.</param>
+    /// <param name="leaseRenewer">The component used to renew renewable Vault leases.</param>
     public SecretRefresher(
         VaultOptions options,
         ILogger<SecretRefresher> logger,
-        ISecretRefreshScheduler scheduler)
+        ISecretRefreshScheduler scheduler,
+        VaultLeaseRenewer leaseRenewer)
     {
         _options = options;
         _logger = logger;
         _scheduler = scheduler;
+        _leaseRenewer = leaseRenewer;
     }
 
     /// <summary>
@@ -187,9 +182,48 @@ public class SecretRefresher : IDisposable, IHostedService
         });
     }
 
+    private async Task RenewLeasesAsync(CancellationToken cancellationToken)
+    {
+        var renewableLeases = _secretMetadata
+            .Where(entry => entry.Value.Renewable && entry.Value.LeaseId is not null)
+            .ToArray();
+
+        foreach (var (path, metadata) in renewableLeases)
+        {
+            try
+            {
+                var newDuration = await _leaseRenewer.RenewAsync(
+                    metadata.LeaseId!,
+                    metadata.LeaseDuration ?? TimeSpan.FromHours(1),
+                    cancellationToken);
+
+                if (newDuration.HasValue)
+                {
+                    var now = DateTimeOffset.UtcNow;
+                    _secretMetadata.TryUpdate(
+                        path,
+                        metadata with
+                        {
+                            LeaseDuration = newDuration,
+                            ExpireTime = now.Add(newDuration.Value),
+                            LastRefreshed = now
+                        },
+                        metadata);
+                }
+            }
+            catch (VaultLeaseRenewalException)
+            {
+                _secretMetadata.TryUpdate(
+                    path,
+                    metadata with { Renewable = false },
+                    metadata);
+            }
+        }
+    }
+
     private async Task RefreshLoopAsync()
     {
-        if (_isRefreshing)
+        if (Interlocked.CompareExchange(ref _isRefreshing, 1, 0) != 0)
         {
             _logger.LogWarning("Previous refresh still running, skipping");
             return;
@@ -197,12 +231,10 @@ public class SecretRefresher : IDisposable, IHostedService
 
         try
         {
-            _isRefreshing = true;
-
             if (!ShouldRefresh())
                 return;
 
-            _logger.LogInformation("Starting secret refresh cycle");
+            await RenewLeasesAsync(CancellationToken.None);
 
             if (OnSecretsRefreshed != null)
             {
@@ -217,7 +249,7 @@ public class SecretRefresher : IDisposable, IHostedService
         }
         finally
         {
-            _isRefreshing = false;
+            Interlocked.Exchange(ref _isRefreshing, 0);
         }
     }
 
@@ -234,35 +266,35 @@ public class SecretRefresher : IDisposable, IHostedService
 /// <summary>
 /// In-memory record of the lease metadata for a single tracked secret.
 /// </summary>
-internal class SecretMetadata
+internal sealed record SecretMetadata
 {
     /// <summary>
-    /// Gets or sets the logical path of the tracked secret.
+    /// Gets or initializes the logical path of the tracked secret.
     /// </summary>
-    public string Path { get; set; } = string.Empty;
+    public string Path { get; init; } = string.Empty;
 
     /// <summary>
-    /// Gets or sets the Vault lease identifier, when the secret is leased.
+    /// Gets or initializes the Vault lease identifier, when the secret is leased.
     /// </summary>
-    public string? LeaseId { get; set; }
+    public string? LeaseId { get; init; }
 
     /// <summary>
-    /// Gets or sets the lease duration returned by Vault, when known.
+    /// Gets or initializes the lease duration returned by Vault, when known.
     /// </summary>
-    public TimeSpan? LeaseDuration { get; set; }
+    public TimeSpan? LeaseDuration { get; init; }
 
     /// <summary>
-    /// Gets or sets the absolute time at which the secret expires, if known.
+    /// Gets or initializes the absolute time at which the secret expires, if known.
     /// </summary>
-    public DateTimeOffset? ExpireTime { get; set; }
+    public DateTimeOffset? ExpireTime { get; init; }
 
     /// <summary>
-    /// Gets or sets a value indicating whether the lease can be renewed.
+    /// Gets or initializes a value indicating whether the lease can be renewed.
     /// </summary>
-    public bool Renewable { get; set; }
+    public bool Renewable { get; init; }
 
     /// <summary>
-    /// Gets or sets the UTC time at which the secret was last refreshed.
+    /// Gets or initializes the UTC time at which the secret was last refreshed.
     /// </summary>
-    public DateTimeOffset LastRefreshed { get; set; }
+    public DateTimeOffset LastRefreshed { get; init; }
 }
