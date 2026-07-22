@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using System.Net.Http;
 using System.Text.Json;
+using System.Threading;
 
 namespace DotNet.Vault.Configuration.Authentication;
 
@@ -17,14 +18,13 @@ namespace DotNet.Vault.Configuration.Authentication;
 /// <see cref="LdapAuthenticationOptions.Password"/>, caches the returned client
 /// token, and refreshes it before its lease expires.
 /// </remarks>
-public class LdapAuthProvider : IVaultAuthenticationProvider
+public class LdapAuthProvider : IVaultAuthenticationProvider, IDisposable
 {
     private readonly LdapAuthenticationOptions _options;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<LdapAuthProvider> _logger;
-    private string? _cachedToken;
-    private DateTimeOffset? _tokenExpiry;
-
+    private readonly SemaphoreSlim _tokenRefreshLock = new(1, 1);
+    private TokenCacheEntry? _tokenCache;
     /// <summary>
     /// Creates a new <see cref="LdapAuthProvider"/> bound to the supplied
     /// options, <see cref="IHttpClientFactory"/>, and logger.
@@ -48,13 +48,30 @@ public class LdapAuthProvider : IVaultAuthenticationProvider
     /// <inheritdoc />
     public async Task<string> GetTokenAsync(CancellationToken cancellationToken = default)
     {
-        if (_cachedToken != null && _tokenExpiry > DateTimeOffset.UtcNow.AddMinutes(5))
+        var cachedToken = Volatile.Read(ref _tokenCache);
+        if (cachedToken is { Token: { } cachedTokenValue } && CanReuse(cachedToken))
         {
-            return _cachedToken;
+            return cachedTokenValue;
         }
 
-        await RefreshAsync(cancellationToken);
-        return _cachedToken ?? throw new VaultAuthenticationException("ldap", "Failed to obtain token");
+        await _tokenRefreshLock.WaitAsync(cancellationToken);
+        try
+        {
+            cachedToken = Volatile.Read(ref _tokenCache);
+            if (cachedToken is { Token: { } refreshedCachedTokenValue } && CanReuse(cachedToken))
+            {
+                return refreshedCachedTokenValue;
+            }
+
+            await RefreshAsync(cancellationToken);
+            cachedToken = Volatile.Read(ref _tokenCache);
+            return cachedToken?.Token
+                ?? throw new VaultAuthenticationException("ldap", "Failed to obtain token");
+        }
+        finally
+        {
+            _tokenRefreshLock.Release();
+        }
     }
 
     /// <inheritdoc />
@@ -74,10 +91,11 @@ public class LdapAuthProvider : IVaultAuthenticationProvider
         var responseContent = await response.Content.ReadAsStringAsync(cancellationToken);
         var result = JsonSerializer.Deserialize<JsonElement>(responseContent);
 
-        _cachedToken = result.GetProperty("auth").GetProperty("client_token").GetString();
-
+        var token = result.GetProperty("auth").GetProperty("client_token").GetString();
         var leaseDuration = result.GetProperty("auth").GetProperty("lease_duration").GetInt32();
-        _tokenExpiry = DateTimeOffset.UtcNow.AddSeconds(leaseDuration);
+        var expiry = DateTimeOffset.UtcNow.AddSeconds(leaseDuration);
+
+        Volatile.Write(ref _tokenCache, new TokenCacheEntry(token, expiry));
 
         _logger.LogInformation(
             "Refreshed LDAP Vault token; lease duration {LeaseDuration}s",
@@ -87,6 +105,23 @@ public class LdapAuthProvider : IVaultAuthenticationProvider
     /// <inheritdoc />
     public Task<bool> IsTokenValidAsync(CancellationToken cancellationToken = default)
     {
-        return Task.FromResult(_cachedToken != null && _tokenExpiry > DateTimeOffset.UtcNow);
+        var cachedToken = Volatile.Read(ref _tokenCache);
+        return Task.FromResult(cachedToken?.Token != null && cachedToken.Expiry > DateTimeOffset.UtcNow);
     }
+
+    /// <summary>
+    /// Releases the synchronization primitive used to serialize token refreshes.
+    /// </summary>
+    public void Dispose()
+    {
+        _tokenRefreshLock.Dispose();
+    }
+
+    private static bool CanReuse(TokenCacheEntry? cachedToken)
+    {
+        return cachedToken?.Token != null
+            && cachedToken.Expiry > DateTimeOffset.UtcNow.AddMinutes(5);
+    }
+
+    private sealed record TokenCacheEntry(string? Token, DateTimeOffset Expiry);
 }
