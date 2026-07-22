@@ -46,7 +46,6 @@ public class VaultConfigurationSource : IConfigurationSource
 
         services.AddSingleton(Options);
         services.AddSingleton<VaultClient>();
-        services.AddSingleton(sp => new Lazy<VaultClient>(() => sp.GetRequiredService<VaultClient>()));
         services.AddSingleton<SecretRefresher>();
 
         // Register the named Vault HttpClient, auth delegating handler, and fallback token provider.
