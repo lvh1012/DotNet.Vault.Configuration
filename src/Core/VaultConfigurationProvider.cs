@@ -38,6 +38,7 @@ public class VaultConfigurationProvider : ConfigurationProvider, IDisposable
     private readonly ILogger<VaultConfigurationProvider> _logger;
     private readonly IDisposable? _serviceProvider;
     private int _refreshStarted;
+    private int _disposed;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="VaultConfigurationProvider"/> class.
@@ -157,6 +158,9 @@ public class VaultConfigurationProvider : ConfigurationProvider, IDisposable
     /// </summary>
     public void Dispose()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            return;
+
         _refresher.OnSecretsRefreshed -= HandleSecretsRefreshed;
         _serviceProvider?.Dispose();
     }
