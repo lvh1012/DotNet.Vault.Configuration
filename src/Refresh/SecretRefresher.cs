@@ -31,7 +31,7 @@ public class SecretRefresher : IDisposable, IHostedService
     private readonly VaultOptions _options;
     private readonly ILogger<SecretRefresher> _logger;
     private readonly Dictionary<string, SecretMetadata> _secretMetadata = new();
-    private Timer? _refreshTimer;
+    private readonly ISecretRefreshScheduler _scheduler;
     private bool _isRefreshing;
 
     /// <summary>
@@ -50,9 +50,24 @@ public class SecretRefresher : IDisposable, IHostedService
     public SecretRefresher(
         VaultOptions options,
         ILogger<SecretRefresher> logger)
+        : this(options, logger, new TimerSecretRefreshScheduler())
+    {
+    }
+
+    /// <summary>
+    /// Initializes a secret refresher with the supplied refresh scheduler.
+    /// </summary>
+    /// <param name="options">The Vault options controlling refresh behavior.</param>
+    /// <param name="logger">The logger used for diagnostic output.</param>
+    /// <param name="scheduler">The scheduler that drives refresh cycles.</param>
+    public SecretRefresher(
+        VaultOptions options,
+        ILogger<SecretRefresher> logger,
+        ISecretRefreshScheduler scheduler)
     {
         _options = options;
         _logger = logger;
+        _scheduler = scheduler;
     }
 
     /// <summary>
@@ -71,12 +86,7 @@ public class SecretRefresher : IDisposable, IHostedService
 
         var interval = _options.Refresh.Interval ?? TimeSpan.FromMinutes(5);
 
-        _refreshTimer = new Timer(
-            async _ => await RefreshLoopAsync(),
-            null,
-            interval,
-            interval);
-
+        _scheduler.Start(interval, RefreshLoopAsync);
         _logger.LogInformation("Secret refresh started with interval: {Interval}", interval);
         return Task.CompletedTask;
     }
@@ -89,7 +99,7 @@ public class SecretRefresher : IDisposable, IHostedService
     /// <returns>A task that completes when the timer has been disabled.</returns>
     public Task StopAsync(CancellationToken cancellationToken)
     {
-        _refreshTimer?.Change(Timeout.Infinite, 0);
+        _scheduler.Stop();
         _logger.LogInformation("Secret refresh stopped");
         return Task.CompletedTask;
     }
@@ -206,8 +216,7 @@ public class SecretRefresher : IDisposable, IHostedService
     /// </summary>
     public void Dispose()
     {
-        _refreshTimer?.Dispose();
-        _refreshTimer = null;
+        _scheduler.Dispose();
     }
 }
 

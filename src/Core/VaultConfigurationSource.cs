@@ -35,6 +35,16 @@ public class VaultConfigurationSource : IConfigurationSource
     public VaultOptions Options { get; set; } = new();
 
     /// <summary>
+    /// Gets or sets an optional factory for the service provider owned by the
+    /// configuration provider.
+    /// </summary>
+    /// <remarks>
+    /// When omitted, <see cref="Build"/> creates the standard Vault service
+    /// composition from <see cref="Options"/>.
+    /// </remarks>
+    public Func<IServiceProvider>? ServiceProviderFactory { get; set; }
+
+    /// <summary>
     /// Builds a <see cref="VaultConfigurationProvider"/> pre-populated with the
     /// authentication providers, secret backends, and dependencies declared in
     /// <see cref="Options"/>.
@@ -43,6 +53,9 @@ public class VaultConfigurationSource : IConfigurationSource
     /// <returns>The configured <see cref="VaultConfigurationProvider"/>.</returns>
     public IConfigurationProvider Build(IConfigurationBuilder builder)
     {
+        if (ServiceProviderFactory is not null)
+            return CreateProvider(ServiceProviderFactory());
+
         var services = new ServiceCollection();
 
         services.AddSingleton(Options);
@@ -104,12 +117,15 @@ public class VaultConfigurationSource : IConfigurationSource
 
         services.AddLogging();
 
-        var serviceProvider = services.BuildServiceProvider();
+        return CreateProvider(services.BuildServiceProvider());
+    }
 
+    private VaultConfigurationProvider CreateProvider(IServiceProvider serviceProvider)
+    {
         var client = serviceProvider.GetRequiredService<VaultClient>();
         var refresher = serviceProvider.GetRequiredService<SecretRefresher>();
         var logger = serviceProvider.GetRequiredService<ILogger<VaultConfigurationProvider>>();
-        var provider = new VaultConfigurationProvider(client, Options, refresher, logger, serviceProvider);
+        var provider = new VaultConfigurationProvider(client, Options, refresher, logger, serviceProvider as IDisposable);
 
         _ = refresher.StartAsync(CancellationToken.None);
 
