@@ -19,7 +19,8 @@ namespace DotNet.Vault.Configuration.Core;
 /// <see cref="ServiceProvider"/> containing the authentication providers and
 /// secret backends required by the requested backends, then resolves the
 /// <see cref="VaultClient"/>, <see cref="SecretRefresher"/>, and
-/// <see cref="ILogger{T}"/> needed by the provider. The
+/// <see cref="ILogger{T}"/> needed by the provider. The provider owns this
+/// service provider and disposes it when its configuration lifetime ends.
 /// <c>Microsoft.Extensions.Options.Options.Create{T}(T)</c> wrapper is
 /// used to bind each authentication options block to its corresponding
 /// <see cref="IVaultAuthenticationProvider"/> implementation without
@@ -108,7 +109,10 @@ public class VaultConfigurationSource : IConfigurationSource
         var client = serviceProvider.GetRequiredService<VaultClient>();
         var refresher = serviceProvider.GetRequiredService<SecretRefresher>();
         var logger = serviceProvider.GetRequiredService<ILogger<VaultConfigurationProvider>>();
+        var provider = new VaultConfigurationProvider(client, Options, refresher, logger, serviceProvider);
 
-        return new VaultConfigurationProvider(client, Options, refresher, logger);
+        _ = refresher.StartAsync(CancellationToken.None);
+
+        return provider;
     }
 }

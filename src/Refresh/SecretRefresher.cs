@@ -207,6 +207,7 @@ public class SecretRefresher : IDisposable, IHostedService
     public void Dispose()
     {
         _refreshTimer?.Dispose();
+        _refreshTimer = null;
     }
 }
 

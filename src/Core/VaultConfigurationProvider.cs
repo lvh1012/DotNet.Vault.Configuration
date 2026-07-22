@@ -36,6 +36,7 @@ public class VaultConfigurationProvider : ConfigurationProvider, IDisposable
     private readonly VaultOptions _options;
     private readonly SecretRefresher _refresher;
     private readonly ILogger<VaultConfigurationProvider> _logger;
+    private readonly IDisposable? _serviceProvider;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="VaultConfigurationProvider"/> class.
@@ -44,16 +45,19 @@ public class VaultConfigurationProvider : ConfigurationProvider, IDisposable
     /// <param name="options">The configured <see cref="VaultOptions"/>.</param>
     /// <param name="refresher">The <see cref="SecretRefresher"/> consulted to drive background refreshes.</param>
     /// <param name="logger">The logger used for diagnostic output.</param>
+    /// <param name="serviceProvider">The source-owned service provider to dispose with this provider.</param>
     public VaultConfigurationProvider(
         VaultClient client,
         VaultOptions options,
         SecretRefresher refresher,
-        ILogger<VaultConfigurationProvider> logger)
+        ILogger<VaultConfigurationProvider> logger,
+        IDisposable? serviceProvider = null)
     {
         _client = client;
         _options = options;
         _refresher = refresher;
         _logger = logger;
+        _serviceProvider = serviceProvider;
         _refresher.OnSecretsRefreshed += HandleSecretsRefreshed;
     }
 
@@ -68,7 +72,15 @@ public class VaultConfigurationProvider : ConfigurationProvider, IDisposable
     /// </remarks>
     public override void Load()
     {
-        LoadAsync().GetAwaiter().GetResult();
+        try
+        {
+            LoadAsync().GetAwaiter().GetResult();
+        }
+        catch
+        {
+            Dispose();
+            throw;
+        }
     }
 
     private async Task LoadAsync()
@@ -131,10 +143,11 @@ public class VaultConfigurationProvider : ConfigurationProvider, IDisposable
     }
 
     /// <summary>
-    /// Unsubscribes from the secret refresher.
+    /// Unsubscribes from the secret refresher and releases source-owned services.
     /// </summary>
     public void Dispose()
     {
         _refresher.OnSecretsRefreshed -= HandleSecretsRefreshed;
+        _serviceProvider?.Dispose();
     }
 }
