@@ -127,7 +127,7 @@ public class VaultClient
             var client = _httpClientFactory.CreateClient(VaultHttpClientFactoryExtensions.VaultClientName);
             var response = await client.GetAsync("/v1/sys/health", cancellationToken);
             var content = await response.Content.ReadAsStringAsync(cancellationToken);
-            return JsonSerializer.Deserialize<VaultHealthResponse>(content)!;
+            return JsonSerializer.Deserialize<VaultHealthResponse>(content, JsonSerializerOptions.Web)!;
         }
         catch (Exception ex)
         {
