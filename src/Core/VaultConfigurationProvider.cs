@@ -18,11 +18,10 @@ namespace DotNet.Vault.Configuration.Core;
 /// then exposed through the inherited <c>Data</c> bag.
 /// </para>
 /// <para>
-/// When <see cref="VaultRefreshOptions.Enabled"/> is <see langword="true"/> and
-/// the <see cref="SecretRefresher"/> reports a positive minimum TTL, a
-/// background <see cref="Timer"/> is scheduled that periodically asks the
-/// refresher whether a refresh is due and, if so, reloads the secrets and
-/// raises <see cref="ConfigurationProvider.OnReload"/>.
+/// When <see cref="VaultRefreshOptions.Enabled"/> is <see langword="true"/>,
+/// <see cref="SecretRefresher"/> schedules the background refresh cycle. This
+/// provider subscribes to its refresh event, reloads the configured secrets,
+/// and raises <see cref="ConfigurationProvider.OnReload"/>.
 /// </para>
 /// <para>
 /// Failures during the initial load are surfaced through
@@ -37,7 +36,6 @@ public class VaultConfigurationProvider : ConfigurationProvider, IDisposable
     private readonly VaultOptions _options;
     private readonly SecretRefresher _refresher;
     private readonly ILogger<VaultConfigurationProvider> _logger;
-    private Timer? _refreshTimer;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="VaultConfigurationProvider"/> class.
@@ -56,6 +54,7 @@ public class VaultConfigurationProvider : ConfigurationProvider, IDisposable
         _options = options;
         _refresher = refresher;
         _logger = logger;
+        _refresher.OnSecretsRefreshed += HandleSecretsRefreshed;
     }
 
     /// <summary>
@@ -78,8 +77,7 @@ public class VaultConfigurationProvider : ConfigurationProvider, IDisposable
         {
             var paths = BuildSecretPaths();
             var secrets = await _client.LoadSecretsAsync(paths);
-            Data = secrets;
-            SetupRefreshIfNeeded();
+            Data = secrets.ToDictionary(kvp => kvp.Key, kvp => (string?)kvp.Value);
             _logger.LogInformation("Loaded {Count} secrets from Vault", secrets.Count);
         }
         catch (Exception ex)
@@ -89,7 +87,7 @@ public class VaultConfigurationProvider : ConfigurationProvider, IDisposable
                 throw;
 
             _logger.LogWarning("FailFast is disabled. Continuing with empty configuration.");
-            Data = new Dictionary<string, string>();
+            Data = new Dictionary<string, string?>();
         }
     }
 
@@ -116,49 +114,27 @@ public class VaultConfigurationProvider : ConfigurationProvider, IDisposable
         return paths;
     }
 
-    private void SetupRefreshIfNeeded()
-    {
-        if (!_options.Refresh.Enabled)
-            return;
 
-        var ttl = _refresher.GetMinimumTtl();
-        if (ttl.HasValue && ttl.Value > TimeSpan.Zero)
-        {
-            var refreshInterval = _options.Refresh.Interval ?? TimeSpan.FromTicks(ttl.Value.Ticks * 8 / 10);
-
-            _refreshTimer = new Timer(
-                async _ => await RefreshAsync(),
-                null,
-                refreshInterval,
-                refreshInterval);
-        }
-    }
-
-    private async Task RefreshAsync()
+    private async Task HandleSecretsRefreshed()
     {
         try
         {
-            if (_refresher.ShouldRefresh())
-            {
-                _logger.LogInformation("Refreshing secrets from Vault");
-                var paths = BuildSecretPaths();
-                var secrets = await _client.LoadSecretsAsync(paths);
-                Data = secrets;
-                OnReload();
-                _logger.LogInformation("Refreshed {Count} secrets", secrets.Count);
-            }
+            var paths = BuildSecretPaths();
+            var secrets = await _client.LoadSecretsAsync(paths);
+            Data = secrets.ToDictionary(kvp => kvp.Key, kvp => (string?)kvp.Value);
+            OnReload();
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to refresh secrets from Vault");
+            _logger.LogError(ex, "Failed to reload secrets after refresh");
         }
     }
 
     /// <summary>
-    /// Disposes the underlying refresh <see cref="Timer"/>, if one was created.
+    /// Unsubscribes from the secret refresher.
     /// </summary>
     public void Dispose()
     {
-        _refreshTimer?.Dispose();
+        _refresher.OnSecretsRefreshed -= HandleSecretsRefreshed;
     }
 }
