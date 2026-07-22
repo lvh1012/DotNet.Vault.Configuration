@@ -1,3 +1,6 @@
+using System.Net.Http;
+using System.Net.Security;
+using System.Security.Cryptography.X509Certificates;
 using DotNet.Vault.Configuration.Authentication;
 using DotNet.Vault.Configuration.Core;
 using Microsoft.Extensions.DependencyInjection;
@@ -43,13 +46,15 @@ public static class VaultHttpClientFactoryExtensions
         {
             client.BaseAddress = options.Uri;
             client.Timeout = options.Timeout;
-        });
+        })
+        .ConfigurePrimaryHttpMessageHandler(() => CreatePrimaryHandler(options));
 
         return services.AddHttpClient(VaultClientName, client =>
         {
             client.BaseAddress = options.Uri;
             client.Timeout = options.Timeout;
         })
+        .ConfigurePrimaryHttpMessageHandler(() => CreatePrimaryHandler(options))
         .AddHttpMessageHandler<VaultAuthDelegatingHandler>()
         .AddPolicyHandler((sp, request) =>
         {
@@ -75,5 +80,50 @@ public static class VaultHttpClientFactoryExtensions
                             attempt, options.Refresh.Retry.MaxRetries, delay);
                     });
         });
+    }
+
+    private static SocketsHttpHandler CreatePrimaryHandler(VaultOptions options)
+    {
+        var ssl = options.Ssl;
+        var handler = new SocketsHttpHandler();
+        var sslOptions = handler.SslOptions;
+        sslOptions.EnabledSslProtocols = ssl.Protocol;
+        sslOptions.CertificateRevocationCheckMode = ssl.CheckCertificateRevocation
+            ? X509RevocationMode.Online
+            : X509RevocationMode.NoCheck;
+        sslOptions.TargetHost = ssl.ServerName ?? options.Uri.Host;
+
+        var clientCertificate = ssl.ClientCertificate ??
+            (ssl.ClientCertificatePath is null
+                ? null
+                : X509CertificateLoader.LoadPkcs12FromFile(
+                    ssl.ClientCertificatePath,
+                    ssl.ClientCertificatePassword));
+        if (clientCertificate is not null)
+        {
+            sslOptions.ClientCertificates = new X509CertificateCollection { clientCertificate };
+        }
+
+        var caCertificate = ssl.CaCertificate ??
+            (ssl.CaCertificatePath is null
+                ? null
+                : X509CertificateLoader.LoadCertificateFromFile(ssl.CaCertificatePath));
+        if (caCertificate is not null)
+        {
+            var chainPolicy = new X509ChainPolicy
+            {
+                TrustMode = X509ChainTrustMode.CustomRootTrust
+            };
+            chainPolicy.CustomTrustStore.Add(caCertificate);
+            sslOptions.CertificateChainPolicy = chainPolicy;
+        }
+
+        if (ssl.SkipVerify)
+        {
+            sslOptions.RemoteCertificateValidationCallback =
+                static (_, _, _, _) => true;
+        }
+
+        return handler;
     }
 }
