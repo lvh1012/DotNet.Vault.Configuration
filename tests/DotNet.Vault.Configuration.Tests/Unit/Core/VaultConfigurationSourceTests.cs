@@ -13,7 +13,7 @@ namespace DotNet.Vault.Configuration.Tests.Unit.Core;
 public class VaultConfigurationSourceTests
 {
     [Fact]
-    public async Task AddVault_StartsOneSharedRefreshCycle_ReloadsOnce_AndStopsAfterProviderAndRootDisposal()
+    public async Task AddVault_WithLeasedSecretAndNoConfiguredInterval_SchedulesSharedRefresherAtEightyPercentOfTtl_AndStopsAfterDisposal()
     {
         var scheduler = new ManualRefreshScheduler();
         var backend = new Mock<IVaultSecretBackend>(MockBehavior.Strict);
@@ -52,8 +52,7 @@ public class VaultConfigurationSourceTests
                 };
                 options.Refresh = new VaultRefreshOptions
                 {
-                    Enabled = true,
-                    Interval = TimeSpan.FromMinutes(1)
+                    Enabled = true
                 };
             });
         var source = Assert.IsType<VaultConfigurationSource>(Assert.Single(builder.Sources));
@@ -84,6 +83,7 @@ public class VaultConfigurationSourceTests
         }, null);
 
         Assert.Equal(1, scheduler.StartCount);
+        Assert.Equal(TimeSpan.FromSeconds(48), scheduler.StartInterval);
         Assert.Equal("initial", configuration["credential"]);
 
         await scheduler.TriggerAsync();
@@ -103,11 +103,26 @@ public class VaultConfigurationSourceTests
         Assert.Equal(2, backendCalls);
     }
 
+    [Fact]
+    public void Build_WithNonDisposableServiceProviderFactoryResult_ThrowsDeterministicOwnershipError()
+    {
+        var source = new VaultConfigurationSource
+        {
+            ServiceProviderFactory = () => new NonDisposableServiceProvider()
+        };
+
+        var exception = Assert.Throws<InvalidOperationException>(() => source.Build(new ConfigurationBuilder()));
+
+        Assert.Contains("ServiceProviderFactory must return an IDisposable service provider.", exception.Message);
+    }
+
     private sealed class ManualRefreshScheduler : ISecretRefreshScheduler
     {
         private Func<Task>? _refresh;
 
         public int StartCount { get; private set; }
+
+        public TimeSpan? StartInterval { get; private set; }
 
         public bool IsDisposed { get; private set; }
 
@@ -115,6 +130,7 @@ public class VaultConfigurationSourceTests
         {
             StartCount++;
             _refresh = refresh;
+            StartInterval = interval;
         }
 
         public void Stop()
@@ -129,6 +145,11 @@ public class VaultConfigurationSourceTests
             IsDisposed = true;
             _refresh = null;
         }
+    }
+
+    private sealed class NonDisposableServiceProvider : IServiceProvider
+    {
+        public object? GetService(Type serviceType) => null;
     }
 
     private sealed class SourceOwnedServiceProvider(

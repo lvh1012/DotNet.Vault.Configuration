@@ -84,10 +84,21 @@ public class SecretRefresher : IDisposable, IHostedService
             return Task.CompletedTask;
         }
 
-        var interval = _options.Refresh.Interval ?? TimeSpan.FromMinutes(5);
+        var interval = _options.Refresh.Interval;
+        if (!interval.HasValue)
+        {
+            var minimumTtl = GetMinimumTtl();
+            if (!minimumTtl.HasValue || minimumTtl.Value <= TimeSpan.Zero)
+            {
+                _logger.LogInformation("Secret refresh was not started because no lease TTL is tracked");
+                return Task.CompletedTask;
+            }
 
-        _scheduler.Start(interval, RefreshLoopAsync);
-        _logger.LogInformation("Secret refresh started with interval: {Interval}", interval);
+            interval = TimeSpan.FromTicks(minimumTtl.Value.Ticks * 8 / 10);
+        }
+
+        _scheduler.Start(interval.Value, RefreshLoopAsync);
+        _logger.LogInformation("Secret refresh started with interval: {Interval}", interval.Value);
         return Task.CompletedTask;
     }
 

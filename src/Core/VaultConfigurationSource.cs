@@ -122,13 +122,16 @@ public class VaultConfigurationSource : IConfigurationSource
 
     private VaultConfigurationProvider CreateProvider(IServiceProvider serviceProvider)
     {
+        if (serviceProvider is not IDisposable disposableServiceProvider)
+        {
+            throw new InvalidOperationException(
+                "ServiceProviderFactory must return an IDisposable service provider.");
+        }
+
         var client = serviceProvider.GetRequiredService<VaultClient>();
         var refresher = serviceProvider.GetRequiredService<SecretRefresher>();
         var logger = serviceProvider.GetRequiredService<ILogger<VaultConfigurationProvider>>();
-        var provider = new VaultConfigurationProvider(client, Options, refresher, logger, serviceProvider as IDisposable);
 
-        _ = refresher.StartAsync(CancellationToken.None);
-
-        return provider;
+        return new VaultConfigurationProvider(client, Options, refresher, logger, disposableServiceProvider);
     }
 }

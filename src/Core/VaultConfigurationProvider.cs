@@ -37,6 +37,7 @@ public class VaultConfigurationProvider : ConfigurationProvider, IDisposable
     private readonly SecretRefresher _refresher;
     private readonly ILogger<VaultConfigurationProvider> _logger;
     private readonly IDisposable? _serviceProvider;
+    private int _refreshStarted;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="VaultConfigurationProvider"/> class.
@@ -91,6 +92,7 @@ public class VaultConfigurationProvider : ConfigurationProvider, IDisposable
             var secrets = await _client.LoadSecretsAsync(paths);
             Data = secrets.ToDictionary(kvp => kvp.Key, kvp => (string?)kvp.Value);
             _logger.LogInformation("Loaded {Count} secrets from Vault", secrets.Count);
+            StartRefresherAfterInitialLoad();
         }
         catch (Exception ex)
         {
@@ -101,6 +103,14 @@ public class VaultConfigurationProvider : ConfigurationProvider, IDisposable
             _logger.LogWarning("FailFast is disabled. Continuing with empty configuration.");
             Data = new Dictionary<string, string?>();
         }
+    }
+
+    private void StartRefresherAfterInitialLoad()
+    {
+        if (Interlocked.CompareExchange(ref _refreshStarted, 1, 0) != 0)
+            return;
+
+        _refresher.StartAsync(CancellationToken.None).GetAwaiter().GetResult();
     }
 
     private List<string> BuildSecretPaths()
