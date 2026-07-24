@@ -131,6 +131,72 @@ public class VaultConfigurationSourceTests
         Assert.NotNull(configuration);
     }
 
+    [Fact]
+    public void Build_WithServiceProviderFactory_InvokesFactoryOnceAndReturnsProvider()
+    {
+        var factoryCalls = 0;
+        var source = new VaultConfigurationSource();
+        source.ServiceProviderFactory = () =>
+        {
+            factoryCalls++;
+            return CreateServiceProvider(source.Options);
+        };
+
+        using var provider = Assert.IsType<VaultConfigurationProvider>(
+            source.Build(new ConfigurationBuilder()));
+
+        Assert.Equal(1, factoryCalls);
+    }
+
+    [Fact]
+    public void Build_WithServiceProviderFactory_DisposesSourceOwnedProviderWhenConfigurationProviderDisposes()
+    {
+        var source = new VaultConfigurationSource();
+        var serviceProvider = CreateServiceProvider(source.Options);
+        source.ServiceProviderFactory = () => serviceProvider;
+
+        var provider = Assert.IsType<VaultConfigurationProvider>(
+            source.Build(new ConfigurationBuilder()));
+
+        provider.Dispose();
+
+        Assert.True(serviceProvider.IsDisposed);
+    }
+
+    [Fact]
+    public void Build_DefaultServices_WithTokenAuthenticationAndNoBackends_LoadsEmptyConfiguration()
+    {
+        var builder = new ConfigurationBuilder()
+            .AddVault(options => options.Authentication.Token = new TokenAuthenticationOptions
+            {
+                Token = "test-token"
+            });
+
+        var configuration = builder.Build();
+        using var configurationLifetime = Assert.IsAssignableFrom<IDisposable>(configuration);
+
+        Assert.DoesNotContain(configuration.AsEnumerable(), pair => pair.Value is not null);
+    }
+
+    private static SourceOwnedServiceProvider CreateServiceProvider(VaultOptions options)
+    {
+        var refresher = new SecretRefresher(
+            options,
+            NullLogger<SecretRefresher>.Instance,
+            new ManualRefreshScheduler(),
+            new VaultLeaseRenewer(
+                Mock.Of<IHttpClientFactory>(),
+                NullLogger<VaultLeaseRenewer>.Instance));
+        var client = new VaultClient(
+            Mock.Of<IHttpClientFactory>(),
+            options,
+            [],
+            [],
+            NullLogger<VaultClient>.Instance);
+
+        return new SourceOwnedServiceProvider(client, refresher);
+    }
+
     private sealed class ManualRefreshScheduler : ISecretRefreshScheduler
     {
         private Func<Task>? _refresh;
@@ -180,6 +246,12 @@ public class VaultConfigurationSourceTests
             _ => null
         };
 
-        public void Dispose() => refresher.Dispose();
+        public bool IsDisposed { get; private set; }
+
+        public void Dispose()
+        {
+            IsDisposed = true;
+            refresher.Dispose();
+        }
     }
 }
