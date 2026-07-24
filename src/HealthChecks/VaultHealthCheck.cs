@@ -93,6 +93,10 @@ public class VaultHealthCheck : IHealthCheck
 
             return HealthCheckResult.Healthy("Vault is healthy", data);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Vault health check failed");

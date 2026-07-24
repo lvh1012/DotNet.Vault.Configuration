@@ -5,6 +5,7 @@ using DotNet.Vault.Configuration.Http;
 using Microsoft.Extensions.Logging;
 using System.Net.Http;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace DotNet.Vault.Configuration.Core;
 
@@ -129,6 +130,10 @@ public class VaultClient
             var content = await response.Content.ReadAsStringAsync(cancellationToken);
             return JsonSerializer.Deserialize<VaultHealthResponse>(content, JsonSerializerOptions.Web)!;
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             throw new VaultConnectionException(_options.Uri, ex);
@@ -187,16 +192,19 @@ public class VaultHealthResponse
     /// </summary>
     public string Version { get; set; } = string.Empty;
 
+    [JsonPropertyName("cluster_name")]
     /// <summary>
     /// Gets or sets the Vault cluster name.
     /// </summary>
     public string ClusterName { get; set; } = string.Empty;
 
+    [JsonPropertyName("cluster_id")]
     /// <summary>
     /// Gets or sets the Vault cluster identifier.
     /// </summary>
     public string ClusterId { get; set; } = string.Empty;
 
+    [JsonPropertyName("server_time_utc")]
     /// <summary>
     /// Gets or sets the server time (UTC) reported by Vault.
     /// </summary>
