@@ -3,6 +3,7 @@ using DotNet.Vault.Configuration.Backends;
 using DotNet.Vault.Configuration.Core.Exceptions;
 using DotNet.Vault.Configuration.Http;
 using Microsoft.Extensions.Logging;
+using System.Net;
 using System.Net.Http;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -121,12 +122,27 @@ public class VaultClient
     /// <exception cref="VaultConnectionException">
     /// Thrown when the health endpoint cannot be reached.
     /// </exception>
+    /// <exception cref="VaultSealedException">
+    /// Thrown when Vault reports that it is sealed.
+    /// </exception>
     public async Task<VaultHealthResponse> GetHealthAsync(CancellationToken cancellationToken = default)
     {
         try
         {
             var client = _httpClientFactory.CreateClient(VaultHttpClientFactoryExtensions.VaultClientName);
             var response = await client.GetAsync("/v1/sys/health", cancellationToken);
+            if (response.StatusCode == HttpStatusCode.ServiceUnavailable)
+            {
+                throw new VaultSealedException();
+            }
+
+            if (response.StatusCode != HttpStatusCode.NotImplemented && !IsHealthyStatus(response.StatusCode))
+            {
+                throw new HttpRequestException(
+                    $"Vault health endpoint returned unexpected HTTP status {(int)response.StatusCode}.",
+                    null,
+                    response.StatusCode);
+            }
             var content = await response.Content.ReadAsStringAsync(cancellationToken);
             return JsonSerializer.Deserialize<VaultHealthResponse>(content, JsonSerializerOptions.Web)!;
         }
@@ -134,10 +150,21 @@ public class VaultClient
         {
             throw;
         }
+        catch (VaultSealedException)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             throw new VaultConnectionException(_options.Uri, ex);
         }
+    }
+
+    private static bool IsHealthyStatus(HttpStatusCode statusCode)
+    {
+        return statusCode == HttpStatusCode.OK ||
+               statusCode == HttpStatusCode.TooManyRequests ||
+               (int)statusCode is 472 or 473;
     }
 
     /// <summary>

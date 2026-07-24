@@ -97,6 +97,10 @@ public class VaultHealthCheck : IHealthCheck
         {
             throw;
         }
+        catch (Core.Exceptions.VaultSealedException)
+        {
+            return HealthCheckResult.Unhealthy("Vault is sealed");
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Vault health check failed");

@@ -137,6 +137,69 @@ public class VaultClientTests
     }
 
     [Fact]
+    public async Task GetHealthAsync_WhenVaultIsSealed_ThrowsVaultSealedException()
+    {
+        var handler = new Mock<HttpMessageHandler>();
+        handler.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+            {
+                Content = new StringContent("{\"initialized\":true,\"sealed\":true,\"standby\":false}", Encoding.UTF8, "application/json")
+            });
+        using var httpClient = new HttpClient(handler.Object) { BaseAddress = new Uri("https://vault.test") };
+        var factory = new Mock<IHttpClientFactory>();
+        factory.Setup(x => x.CreateClient(VaultHttpClientFactoryExtensions.VaultClientName)).Returns(httpClient);
+        var client = CreateClient(httpClientFactory: factory.Object);
+
+        await Assert.ThrowsAsync<VaultSealedException>(() => client.GetHealthAsync());
+    }
+
+
+    [Theory]
+    [InlineData(HttpStatusCode.TooManyRequests)]
+    [InlineData((HttpStatusCode)472)]
+    [InlineData((HttpStatusCode)473)]
+    public async Task GetHealthAsync_WhenVaultIsUnsealedNonActive_ReturnsHealthResponse(HttpStatusCode statusCode)
+    {
+        var handler = new Mock<HttpMessageHandler>();
+        handler.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync(new HttpResponseMessage(statusCode)
+            {
+                Content = new StringContent("{\"initialized\":true,\"sealed\":false,\"standby\":true}", Encoding.UTF8, "application/json")
+            });
+        using var httpClient = new HttpClient(handler.Object) { BaseAddress = new Uri("https://vault.test") };
+        var factory = new Mock<IHttpClientFactory>();
+        factory.Setup(x => x.CreateClient(VaultHttpClientFactoryExtensions.VaultClientName)).Returns(httpClient);
+        var client = CreateClient(httpClientFactory: factory.Object);
+
+        var health = await client.GetHealthAsync();
+
+        Assert.True(health.Initialized);
+        Assert.False(health.Sealed);
+    }
+
+    [Fact]
+    public async Task GetHealthAsync_WhenVaultReturnsUnexpectedStatus_WrapsFailureWithConfiguredVaultUri()
+    {
+        var handler = new Mock<HttpMessageHandler>();
+        handler.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.InternalServerError)
+            {
+                Content = new StringContent("{\"initialized\":true,\"sealed\":false}", Encoding.UTF8, "application/json")
+            });
+        using var httpClient = new HttpClient(handler.Object) { BaseAddress = new Uri("https://vault.test") };
+        var factory = new Mock<IHttpClientFactory>();
+        factory.Setup(x => x.CreateClient(VaultHttpClientFactoryExtensions.VaultClientName)).Returns(httpClient);
+        var options = new VaultOptions { Uri = new Uri("https://configured-vault.test") };
+        var client = CreateClient(httpClientFactory: factory.Object, options: options);
+
+        var exception = await Assert.ThrowsAsync<VaultConnectionException>(() => client.GetHealthAsync());
+
+        Assert.Equal(options.Uri, exception.VaultUri);
+    }
+    [Fact]
     public async Task GetHealthAsync_WhenRequestFails_WrapsFailureWithConfiguredVaultUri()
     {
         var networkFailure = new HttpRequestException("connection failed");
