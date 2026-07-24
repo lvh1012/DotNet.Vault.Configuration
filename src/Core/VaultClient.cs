@@ -50,6 +50,28 @@ public class VaultClient
         _backends = backends;
         _logger = logger;
     }
+    /// <summary>
+    /// Initializes a new instance of the <see cref="VaultClient"/> class with a supplied HTTP client.
+    /// </summary>
+    /// <param name="httpClient">The HTTP client used to talk to the Vault server.</param>
+    /// <param name="options">The configured <see cref="VaultOptions"/> for the target Vault server.</param>
+    /// <param name="authProviders">The available authentication providers.</param>
+    /// <param name="backends">The available secret backends.</param>
+    /// <param name="logger">The logger used for diagnostic output.</param>
+    public VaultClient(
+        HttpClient httpClient,
+        VaultOptions options,
+        IEnumerable<IVaultAuthenticationProvider> authProviders,
+        IEnumerable<IVaultSecretBackend> backends,
+        ILogger<VaultClient> logger)
+        : this(new SingleHttpClientFactory(httpClient), options, authProviders, backends, logger)
+    {
+        httpClient.BaseAddress = options.Uri;
+        httpClient.Timeout = options.Timeout;
+    }
+
+    internal IHttpClientFactory HttpClientFactory => _httpClientFactory;
+
 
     /// <summary>
     /// Loads the secrets exposed at the given logical paths, dispatching each path

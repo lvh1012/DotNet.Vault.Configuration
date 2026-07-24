@@ -21,7 +21,7 @@ public class DatabaseSecretBackend : IVaultSecretBackend
 {
     private readonly DatabaseSecretBackendOptions _options;
     private readonly IHttpClientFactory _httpClientFactory;
-    private readonly SecretRefresher _refresher;
+    private readonly SecretRefresher? _refresher;
     private readonly IVaultAuthenticationProvider? _authProvider;
 
     /// <summary>
@@ -37,6 +37,17 @@ public class DatabaseSecretBackend : IVaultSecretBackend
         _httpClientFactory = httpClientFactory;
         _refresher = refresher;
         _authProvider = authProvider;
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="DatabaseSecretBackend"/> class with a supplied HTTP client.
+    /// </summary>
+    /// <param name="options">The database backend options.</param>
+    /// <param name="httpClient">The HTTP client used to call the Vault API.</param>
+    /// <param name="authProvider">The optional authentication provider used to attach an <c>X-Vault-Token</c> header to outgoing requests.</param>
+    public DatabaseSecretBackend(DatabaseSecretBackendOptions options, HttpClient httpClient, IVaultAuthenticationProvider? authProvider = null)
+        : this(options, new SingleHttpClientFactory(httpClient), null!, authProvider)
+    {
     }
 
     /// <inheritdoc />
@@ -87,7 +98,7 @@ public class DatabaseSecretBackend : IVaultSecretBackend
             ExpireTime = leaseDuration.HasValue ? DateTimeOffset.UtcNow.Add(leaseDuration.Value) : null
         };
 
-        _refresher.TrackSecret(request.Path, secretResult);
+        _refresher?.TrackSecret(request.Path, secretResult);
         return secretResult;
     }
 

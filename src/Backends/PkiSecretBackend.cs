@@ -24,7 +24,7 @@ public class PkiSecretBackend : IVaultSecretBackend
 {
     private readonly PkiSecretBackendOptions _options;
     private readonly IHttpClientFactory _httpClientFactory;
-    private readonly SecretRefresher _refresher;
+    private readonly SecretRefresher? _refresher;
     private readonly IVaultAuthenticationProvider? _authProvider;
 
     /// <summary>
@@ -41,6 +41,17 @@ public class PkiSecretBackend : IVaultSecretBackend
         _refresher = refresher;
         _authProvider = authProvider;
     }
+    /// <summary>
+    /// Initializes a new instance of the <see cref="PkiSecretBackend"/> class with a supplied HTTP client.
+    /// </summary>
+    /// <param name="options">The PKI backend options.</param>
+    /// <param name="httpClient">The HTTP client used to call the Vault API.</param>
+    /// <param name="authProvider">The optional authentication provider used to attach an <c>X-Vault-Token</c> header to outgoing requests.</param>
+    public PkiSecretBackend(PkiSecretBackendOptions options, HttpClient httpClient, IVaultAuthenticationProvider? authProvider = null)
+        : this(options, new SingleHttpClientFactory(httpClient), null!, authProvider)
+    {
+    }
+
 
     /// <inheritdoc />
     public string BackendType => "pki";
@@ -123,7 +134,7 @@ public class PkiSecretBackend : IVaultSecretBackend
             ExpireTime = leaseDuration.HasValue ? DateTimeOffset.UtcNow.Add(leaseDuration.Value) : null
         };
 
-        _refresher.TrackSecret(request.Path, secretResult);
+        _refresher?.TrackSecret(request.Path, secretResult);
         return secretResult;
     }
 

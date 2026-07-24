@@ -53,7 +53,7 @@ public class VaultConfigurationProvider : ConfigurationProvider, IDisposable
         VaultOptions options,
         SecretRefresher refresher,
         ILogger<VaultConfigurationProvider> logger,
-        IDisposable? serviceProvider = null)
+        IDisposable? serviceProvider)
     {
         _client = client;
         _options = options;
@@ -62,6 +62,22 @@ public class VaultConfigurationProvider : ConfigurationProvider, IDisposable
         _serviceProvider = serviceProvider;
         _refresher.OnSecretsRefreshed += HandleSecretsRefreshed;
     }
+    /// <summary>
+    /// Initializes a new instance of the <see cref="VaultConfigurationProvider"/> class.
+    /// </summary>
+    /// <param name="client">The <see cref="VaultClient"/> used to load secrets from Vault.</param>
+    /// <param name="options">The configured <see cref="VaultOptions"/>.</param>
+    /// <param name="refresher">The <see cref="SecretRefresher"/> consulted to drive background refreshes.</param>
+    /// <param name="logger">The logger used for diagnostic output.</param>
+    public VaultConfigurationProvider(
+        VaultClient client,
+        VaultOptions options,
+        SecretRefresher refresher,
+        ILogger<VaultConfigurationProvider> logger)
+        : this(client, options, refresher, logger, null)
+    {
+    }
+
 
     /// <summary>
     /// Loads the configured secrets from Vault synchronously by blocking on the

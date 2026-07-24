@@ -43,6 +43,18 @@ public class KubernetesAuthProvider : IVaultAuthenticationProvider, IDisposable
         _httpClientFactory = httpClientFactory;
         _logger = logger;
     }
+    /// <summary>
+    /// Creates a new <see cref="KubernetesAuthProvider"/> bound to the supplied options and HTTP client.
+    /// </summary>
+    /// <param name="options">The Kubernetes authentication options.</param>
+    /// <param name="httpClient">The HTTP client used to call the Vault login endpoint.</param>
+    public KubernetesAuthProvider(
+        IOptions<KubernetesAuthenticationOptions> options,
+        HttpClient httpClient)
+        : this(options, new SingleHttpClientFactory(httpClient), Microsoft.Extensions.Logging.Abstractions.NullLogger<KubernetesAuthProvider>.Instance)
+    {
+    }
+
 
     /// <inheritdoc />
     public string AuthenticationMethod => "kubernetes";
@@ -92,7 +104,7 @@ public class KubernetesAuthProvider : IVaultAuthenticationProvider, IDisposable
             System.Text.Encoding.UTF8,
             "application/json");
 
-        using var client = _httpClientFactory.CreateClient(VaultHttpClientFactoryExtensions.VaultAuthClientName);
+        var client = _httpClientFactory.CreateClient(VaultHttpClientFactoryExtensions.VaultAuthClientName);
         var response = await client.PostAsync($"/v1/auth/{_options.KubernetesRolePath}/login", content, cancellationToken);
         response.EnsureSuccessStatusCode();
 

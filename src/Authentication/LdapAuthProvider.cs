@@ -42,6 +42,18 @@ public class LdapAuthProvider : IVaultAuthenticationProvider, IDisposable
         _logger = logger;
     }
 
+    /// <summary>
+    /// Creates a new <see cref="LdapAuthProvider"/> bound to the supplied options and HTTP client.
+    /// </summary>
+    /// <param name="options">The LDAP authentication options.</param>
+    /// <param name="httpClient">The HTTP client used to call the Vault login endpoint.</param>
+    public LdapAuthProvider(
+        IOptions<LdapAuthenticationOptions> options,
+        HttpClient httpClient)
+        : this(options, new SingleHttpClientFactory(httpClient), Microsoft.Extensions.Logging.Abstractions.NullLogger<LdapAuthProvider>.Instance)
+    {
+    }
+
     /// <inheritdoc />
     public string AuthenticationMethod => "ldap";
 
@@ -84,7 +96,7 @@ public class LdapAuthProvider : IVaultAuthenticationProvider, IDisposable
             System.Text.Encoding.UTF8,
             "application/json");
 
-        using var client = _httpClientFactory.CreateClient(VaultHttpClientFactoryExtensions.VaultAuthClientName);
+        var client = _httpClientFactory.CreateClient(VaultHttpClientFactoryExtensions.VaultAuthClientName);
         var response = await client.PostAsync($"/v1/auth/{_options.LdapPath}/login/{_options.Username}", content, cancellationToken);
         response.EnsureSuccessStatusCode();
 

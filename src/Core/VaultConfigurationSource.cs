@@ -59,10 +59,19 @@ public class VaultConfigurationSource : IConfigurationSource
         var services = new ServiceCollection();
 
         services.AddSingleton(Options);
-        services.AddSingleton<VaultClient>();
+        services.AddSingleton(sp => new VaultClient(
+            sp.GetRequiredService<IHttpClientFactory>(),
+            Options,
+            sp.GetServices<IVaultAuthenticationProvider>(),
+            sp.GetServices<IVaultSecretBackend>(),
+            sp.GetRequiredService<ILogger<VaultClient>>()));
         services.AddSingleton<ISecretRefreshScheduler, TimerSecretRefreshScheduler>();
         services.AddSingleton<VaultLeaseRenewer>();
-        services.AddSingleton<SecretRefresher>();
+        services.AddSingleton(sp => new SecretRefresher(
+            Options,
+            sp.GetRequiredService<ILogger<SecretRefresher>>(),
+            sp.GetRequiredService<ISecretRefreshScheduler>(),
+            sp.GetRequiredService<VaultLeaseRenewer>()));
 
         // Register the named Vault HttpClient, auth delegating handler, and fallback token provider.
         services.AddVaultHttpClient(Options);

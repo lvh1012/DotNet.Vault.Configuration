@@ -22,7 +22,7 @@ public class KvSecretBackend : IVaultSecretBackend
 {
     private readonly KvSecretBackendOptions _options;
     private readonly IHttpClientFactory _httpClientFactory;
-    private readonly SecretRefresher _refresher;
+    private readonly SecretRefresher? _refresher;
     private readonly IVaultAuthenticationProvider? _authProvider;
 
     /// <summary>
@@ -39,6 +39,17 @@ public class KvSecretBackend : IVaultSecretBackend
         _refresher = refresher;
         _authProvider = authProvider;
     }
+    /// <summary>
+    /// Initializes a new instance of the <see cref="KvSecretBackend"/> class with a supplied HTTP client.
+    /// </summary>
+    /// <param name="options">The KV backend options.</param>
+    /// <param name="httpClient">The HTTP client used to call the Vault API.</param>
+    /// <param name="authProvider">The optional authentication provider used to attach an <c>X-Vault-Token</c> header to outgoing requests.</param>
+    public KvSecretBackend(KvSecretBackendOptions options, HttpClient httpClient, IVaultAuthenticationProvider? authProvider = null)
+        : this(options, new SingleHttpClientFactory(httpClient), null!, authProvider)
+    {
+    }
+
 
     /// <inheritdoc />
     public string BackendType => "kv";
@@ -88,7 +99,7 @@ public class KvSecretBackend : IVaultSecretBackend
             Renewable = false
         };
 
-        _refresher.TrackSecret(request.Path, secretResult);
+        _refresher?.TrackSecret(request.Path, secretResult);
         return secretResult;
     }
 

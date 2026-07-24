@@ -64,6 +64,26 @@ public class SecretRefresher : IDisposable, IHostedService
         _scheduler = scheduler;
         _leaseRenewer = leaseRenewer;
     }
+    /// <summary>
+    /// Initializes a secret refresher for a legacy <see cref="VaultClient"/> instance.
+    /// </summary>
+    /// <param name="client">The Vault client whose HTTP client is used to renew leases.</param>
+    /// <param name="options">The Vault options controlling refresh behavior.</param>
+    /// <param name="logger">The logger used for diagnostic output.</param>
+    public SecretRefresher(
+        VaultClient client,
+        VaultOptions options,
+        ILogger<SecretRefresher> logger)
+        : this(
+            options,
+            logger,
+            new TimerSecretRefreshScheduler(),
+            new VaultLeaseRenewer(
+                client,
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<VaultLeaseRenewer>.Instance))
+    {
+    }
+
 
     /// <summary>
     /// Starts the background refresh timer when

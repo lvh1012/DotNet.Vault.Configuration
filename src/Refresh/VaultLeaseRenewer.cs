@@ -13,6 +13,8 @@ public class VaultLeaseRenewer
 {
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<VaultLeaseRenewer> _logger;
+    private readonly Func<CancellationToken, Task<string>>? _tokenProvider;
+
 
     /// <summary>
     /// Initializes a new instance of the <see cref="VaultLeaseRenewer"/> class.
@@ -26,6 +28,15 @@ public class VaultLeaseRenewer
         _httpClientFactory = httpClientFactory;
         _logger = logger;
     }
+
+    internal VaultLeaseRenewer(
+        Core.VaultClient client,
+        ILogger<VaultLeaseRenewer> logger)
+        : this(client.HttpClientFactory, logger)
+    {
+        _tokenProvider = client.GetTokenAsync;
+    }
+
 
     /// <summary>
     /// Renews the specified Vault lease.
@@ -62,7 +73,18 @@ public class VaultLeaseRenewer
         {
             var client = _httpClientFactory.CreateClient(VaultHttpClientFactoryExtensions.VaultClientName);
             var payload = new { lease_id = leaseId, increment = (int)increment.TotalSeconds };
-            using var response = await client.PutAsJsonAsync("/v1/sys/leases/renew", payload, cancellationToken);
+            using var request = new HttpRequestMessage(HttpMethod.Put, "/v1/sys/leases/renew")
+            {
+                Content = JsonContent.Create(payload)
+            };
+            if (_tokenProvider is not null)
+            {
+                var token = await _tokenProvider(cancellationToken);
+                if (!string.IsNullOrEmpty(token))
+                    request.Headers.Add("X-Vault-Token", token);
+            }
+
+            using var response = await client.SendAsync(request, cancellationToken);
             response.EnsureSuccessStatusCode();
             var result = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: cancellationToken);
             return result.TryGetProperty("lease_duration", out var d) ? TimeSpan.FromSeconds(d.GetInt32()) : null;
