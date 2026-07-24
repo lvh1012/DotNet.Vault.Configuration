@@ -89,7 +89,24 @@ public class PkiSecretBackend : IVaultSecretBackend
                 secrets["certificate.key"] = key.GetString() ?? "";
 
             if (data.TryGetProperty("ca_chain", out var caChain))
-                secrets["certificate.ca_chain"] = caChain.GetString() ?? "";
+            {
+                if (caChain.ValueKind == JsonValueKind.Array)
+                {
+                    var certificates = new List<string>();
+                    foreach (var certificate in caChain.EnumerateArray())
+                    {
+                        var pem = certificate.GetString();
+                        if (pem is not null)
+                            certificates.Add(pem);
+                    }
+
+                    secrets["certificate.ca_chain"] = string.Join(Environment.NewLine, certificates);
+                }
+                else
+                {
+                    secrets["certificate.ca_chain"] = caChain.GetString() ?? "";
+                }
+            }
         }
 
         var leaseId = result.TryGetProperty("lease_id", out var leaseIdProp) ? leaseIdProp.GetString() : null;

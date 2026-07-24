@@ -38,7 +38,7 @@ public sealed class PkiSecretBackendTests
     {
         var handler = CreateHandler(
             HttpStatusCode.OK,
-            "{\"lease_id\":\"pki/issue/api/lease\",\"lease_duration\":300,\"data\":{\"certificate\":\"certificate-pem\",\"private_key\":\"private-key-pem\",\"ca_chain\":\"ca-chain-pem\"}}");
+            "{\"lease_id\":\"pki/issue/api/lease\",\"lease_duration\":300,\"data\":{\"certificate\":\"certificate-pem\",\"private_key\":\"private-key-pem\",\"ca_chain\":[\"issuing-ca-pem\",\"root-ca-pem\"]}}");
         using var httpClient = new HttpClient(handler.Object) { BaseAddress = new Uri("https://vault.test") };
         using var refresher = CreateRefresher();
         var backend = CreateBackend(httpClient, refresher);
@@ -47,7 +47,7 @@ public sealed class PkiSecretBackendTests
 
         Assert.Equal("certificate-pem", result.Secrets["certificate.pem"]);
         Assert.Equal("private-key-pem", result.Secrets["certificate.key"]);
-        Assert.Equal("ca-chain-pem", result.Secrets["certificate.ca_chain"]);
+        Assert.Equal($"issuing-ca-pem{Environment.NewLine}root-ca-pem", result.Secrets["certificate.ca_chain"]);
         Assert.Equal("pki/issue/api/lease", result.LeaseId);
         Assert.Equal(TimeSpan.FromMinutes(5), result.LeaseDuration);
         Assert.False(result.Renewable);
